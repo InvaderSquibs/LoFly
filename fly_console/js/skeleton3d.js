@@ -147,6 +147,7 @@
     let stageBoost = { ALPN: 0, Kenyon_Cell: 0, MBON: 0, DAN: 0, other: 0 };
     let lastPaint = 0;
     let paintCursor = 0;
+    let streamActive = false;
     let resolveReady;
     const readyPromise = new Promise((r) => {
       resolveReady = r;
@@ -313,7 +314,6 @@
         animId = requestAnimationFrame(tick);
         const t = now * 0.001;
 
-        // Cheap per-frame: quiet stages stay nearly invisible.
         for (const line of lines) {
           const st = line.userData.stage || "other";
           const boost = stageBoost[st] != null ? stageBoost[st] : stageBoost.other;
@@ -323,16 +323,21 @@
             continue;
           }
           line.visible = true;
-          const breath =
-            0.78 +
-            0.22 * Math.sin(t * (1.2 + boost * 3.5) + (line.material.userData.fadePhase || 0));
-          // Quadratic gate → idle ≈ see-through, firing pops opaque.
-          line.material.opacity = Math.min(1, Math.pow(boost, 1.35) * breath);
+          if (streamActive) {
+            const breath =
+              0.78 +
+              0.22 *
+                Math.sin(
+                  t * (1.2 + boost * 3.5) + (line.material.userData.fadePhase || 0)
+                );
+            line.material.opacity = Math.min(1, Math.pow(boost, 1.35) * breath);
+          } else {
+            // Frozen at last pathway rates — no autonomous shimmer when paused
+            line.material.opacity = Math.min(1, Math.pow(boost, 1.35) * 0.85);
+          }
         }
 
-        // Traveling wave along axons (~12 Hz), round-robin batches so we
-        // don't rewrite all geometries every tick.
-        if (now - lastPaint > 80) {
+        if (streamActive && now - lastPaint > 80) {
           lastPaint = now;
           const batch = 400;
           const start = (paintCursor || 0) % Math.max(1, lines.length);
@@ -342,7 +347,8 @@
             const boost = stageBoost[st] != null ? stageBoost[st] : stageBoost.other;
             const speed = line.userData.speed || 0.5;
             const wavePos =
-              (t * speed * (0.4 + boost * 1.6) + (line.material.userData.fadePhase || 0)) % 1;
+              (t * speed * (0.4 + boost * 1.6) + (line.material.userData.fadePhase || 0)) %
+              1;
             paintWave(line, boost, wavePos);
           }
           paintCursor = start + batch;
@@ -373,6 +379,10 @@
       applyState(stateData);
     }
 
+    function setActive(on) {
+      streamActive = !!on;
+    }
+
     function destroy() {
       disposed = true;
       cancelAnimationFrame(animId);
@@ -383,7 +393,7 @@
       lines = [];
     }
 
-    return { init, update, destroy, ready: readyPromise };
+    return { init, update, setActive, destroy, ready: readyPromise };
   }
 
   global.FlySkeleton3D = {

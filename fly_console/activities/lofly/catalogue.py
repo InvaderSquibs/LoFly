@@ -65,15 +65,19 @@ def analyze_track(path: Path, sr: int = 22050) -> dict:
     onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
     onset_density = float(len(onset_frames) / max(duration, 1e-6))
 
-    # Chroma
+    # Chroma timeline at 0.2s — real slices along the song, not a handful of landmarks
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_mean = chroma.mean(axis=1)
     chroma_std = chroma.std(axis=1)
 
-    # Sample a few time slices of chroma for "stream experience" later
-    n_slices = 8
-    idxs = np.linspace(0, chroma.shape[1] - 1, n_slices).astype(int)
-    chroma_timeline = [chroma[:, i].tolist() for i in idxs]
+    slice_sec = 0.2
+    n_frames = chroma.shape[1]
+    times = np.arange(0.0, duration, slice_sec)
+    if len(times) == 0 or float(times[-1]) < duration - 1e-9:
+        times = np.append(times, duration)
+    frame_times = librosa.frames_to_time(np.arange(n_frames), sr=sr)
+    idxs = np.clip(np.searchsorted(frame_times, times, side="left"), 0, n_frames - 1)
+    chroma_timeline = [chroma[:, int(i)].tolist() for i in idxs]
 
     pitch_class, mode, key_corr = _estimate_key(chroma_mean)
     camelot = key_to_camelot(pitch_class, mode)

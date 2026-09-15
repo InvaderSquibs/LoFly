@@ -12,8 +12,10 @@
   const CAMELOT_OK = { same: 1, relative: 1, adjacent: 1, diagonal: 1 };
   const CLASH_PENALTY = 0.72;
   const CAMELOT_BOOST = 1.08;
-  const STICKY_MARGIN = 0.08; // harder to steal attention
-  const GLANCE_SEC = 7; // how long one other track stays in view
+  const STICKY_MARGIN = 0.08;
+  const GLANCE_SEC = 7; // decision window / memory length
+  const MEMORY_SEC = 7;
+  const CHROMA_SLICE_SEC = 0.2; // animation + memory sample rate
   const TICK_SEC = 20;
   const MIN_TICKS = 3;
   const MAX_TICKS = 12;
@@ -231,19 +233,61 @@
     return arr[Math.floor(rng() * arr.length)];
   }
 
+  function lerpChroma(a, b, t) {
+    const out = [];
+    for (let i = 0; i < 12; i++) {
+      const x = Number(a && a[i]) || 0;
+      const y = Number(b && b[i]) || 0;
+      out.push(x + (y - x) * t);
+    }
+    return out;
+  }
+
+  /** Smooth chroma along catalogue timeline (interpolated, not stepped). */
   function chromaAtProgress(track, progress) {
     const tl = track.chroma_timeline;
-    if (!tl || !tl.length) return track.chroma_mean || Array(12).fill(0.08);
-    const p = Math.max(0, Math.min(0.999, progress));
-    const idx = Math.min(tl.length - 1, Math.floor(p * tl.length));
-    return tl[idx];
+    const fallback = track.chroma_mean || Array(12).fill(0.08);
+    if (!tl || !tl.length) return fallback.slice();
+    if (tl.length === 1) return tl[0].slice();
+    const p = Math.max(0, Math.min(0.999999, progress));
+    const f = p * (tl.length - 1);
+    const i = Math.floor(f);
+    const t = f - i;
+    const a = tl[i];
+    const b = tl[Math.min(i + 1, tl.length - 1)];
+    return lerpChroma(a, b, t);
+  }
+
+  /**
+   * Real chroma at wall-clock time into the track (catalogue is 0.2s slices).
+   * Lerps between neighboring slices — never loops.
+   */
+  function chromaAtTime(track, timeSec) {
+    const tl = track.chroma_timeline;
+    const fallback = track.chroma_mean || Array(12).fill(0.08);
+    if (!tl || !tl.length) return fallback.slice();
+    if (tl.length === 1) return tl[0].slice();
+    const f = Math.max(0, Number(timeSec) || 0) / CHROMA_SLICE_SEC;
+    const maxI = tl.length - 1;
+    if (f >= maxI) return tl[maxI].slice();
+    const i = Math.floor(f);
+    const frac = f - i;
+    return lerpChroma(tl[i], tl[Math.min(i + 1, maxI)], frac);
   }
 
   /** One remembered slice of a track — not the full-song mean. */
   function glimpseChroma(track, rng) {
-    const tl = track.chroma_timeline;
-    if (!tl || !tl.length) return track.chroma_mean || Array(12).fill(0.08);
-    return tl[Math.floor(rng() * tl.length)];
+    return chromaAtProgress(track, rng());
+  }
+
+  function meanChroma(samples) {
+    if (!samples || !samples.length) return Array(12).fill(0);
+    const out = Array(12).fill(0);
+    for (const s of samples) {
+      for (let i = 0; i < 12; i++) out[i] += Number(s[i]) || 0;
+    }
+    const n = samples.length;
+    return out.map((x) => x / n);
   }
 
   function eligibleIds(tracks, exclude) {
@@ -264,6 +308,8 @@
   global.LoFlyLive = {
     STICKY_MARGIN,
     GLANCE_SEC,
+    MEMORY_SEC,
+    CHROMA_SLICE_SEC,
     TICK_SEC,
     DEFAULT_TOGGLES,
     nTicksFor,
@@ -272,7 +318,9 @@
     scoreGlance,
     pickRandom,
     chromaAtProgress,
+    chromaAtTime,
     glimpseChroma,
+    meanChroma,
     eligibleIds,
     camelotDistance,
     courtshipDrive,

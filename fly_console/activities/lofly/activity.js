@@ -7,10 +7,12 @@
 
   const LOFLY_BASE = "activities/lofly/";
   const PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const BIN_MS = 250; // append a brain sample every 250ms of song
-  const MAX_BINS = 480; // ~2 min display window
+  const BIN_MS = 250;
+  const MAX_BINS = 480;
+  const BRIAN_T_RUN_MS = 150;
 
   let live = null;
+  let listeningBank = null; // { tracks: { id: { quiet, hot, hot_drive } } }
 
   function tok(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -252,7 +254,9 @@
         <span class="lofly-badge">${escapeHtml(playing.camelot)}</span>
         <span class="lofly-bpm">${fmtBpm(playing.bpm)}</span>
       </div>
-      <div class="lofly-bpm">${Number(playing.duration_s).toFixed(0)}s · moment chroma · glances ${glanceCount || 0}</div>`;
+      <div class="lofly-bpm">${Number(playing.duration_s).toFixed(0)}s · real 0.2s chroma · 7s memory · glances ${glanceCount || 0} · ${
+        live.brainSource === "brian2" ? "Brian2" : "stand-in"
+      }</div>`;
 
     document.getElementById("loflyCourting").innerHTML = courting
       ? `<div class="lofly-row">
@@ -357,7 +361,86 @@
     }
   }
 
-  function pushBrainPanels() {
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function blendSims(quiet, hot, drive, hotDrive) {
+    const t = Math.max(0, Math.min(1, drive / Math.max(0.01, hotDrive || 0.75)));
+    const stages = ["ALPN", "Kenyon_Cell", "MBON", "DAN"];
+    const rate_curves = {};
+    stages.forEach((s) => {
+      const a = (quiet.rate_curves && quiet.rate_curves[s]) || [];
+      const b = (hot.rate_curves && hot.rate_curves[s]) || [];
+      const n = Math.max(a.length, b.length);
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        out.push(Math.round(lerp(a[i] || 0, b[i] || 0, t) * 10) / 10);
+      }
+      rate_curves[s] = out;
+    });
+    // Prefer hot raster when drive high (real Brian2 spikes)
+    const raster = t >= 0.45 ? hot.raster || quiet.raster : quiet.raster || hot.raster;
+    return {
+      rate_curves,
+      raster: raster || {},
+      alpn_rate: lerp(quiet.alpn_rate || 0, hot.alpn_rate || 0, t),
+      kc_rate: lerp(quiet.kc_rate || 0, hot.kc_rate || 0, t),
+      mbon_rate: lerp(quiet.mbon_rate || 0, hot.mbon_rate || 0, t),
+      dan_rate: lerp(quiet.dan_rate || 0, hot.dan_rate || 0, t),
+      source: "brian2",
+      blend: t,
+    };
+  }
+
+  function bankEntryFor(trackId) {
+    if (!listeningBank || !listeningBank.tracks) return null;
+    return listeningBank.tracks[trackId] || null;
+  }
+
+  /** Push Brian2 curves scrubbed to song progress (real subgraph activity). */
+  function pushBrianPanels(songFrac, drive) {
+    if (!live || !live.hooks || !live.playing) return false;
+    const entry = bankEntryFor(live.playing.id);
+    if (!entry || !entry.quiet || !entry.hot) return false;
+
+    const blended = blendSims(entry.quiet, entry.hot, drive, entry.hot_drive);
+    const frac = Math.max(0, Math.min(1, songFrac));
+    const stateData = {
+      rate_curves: blended.rate_curves,
+      raster: blended.raster,
+      alpn_rate: blended.alpn_rate,
+      kc_rate: blended.kc_rate,
+      mbon_rate: blended.mbon_rate,
+      dan_rate: blended.dan_rate,
+      stimulus: {
+        channels: PITCH_NAMES,
+        values: live.lastChroma || live.playing.chroma_mean,
+      },
+      brain_source: "brian2",
+    };
+    const meta = Object.assign({}, live.hooks.meta || {}, {
+      t_run_ms: BRIAN_T_RUN_MS,
+      bin_ms: 3,
+    });
+    const FE = global.FlyExperience;
+    if (!FE) return false;
+    FE.setStreamContext({
+      cascadeSvg: live.hooks.cascadeSvg,
+      rasterSvg: live.hooks.rasterSvg,
+      legendEl: live.hooks.legendEl,
+      stateData,
+      meta,
+      onProgress: (_f, sliced) => {
+        driveAnatomy(sliced || stateData);
+      },
+    });
+    FE.setStreamProgress(frac);
+    live.brainSource = "brian2";
+    return true;
+  }
+
+  function pushStandinPanels() {
     if (!live || !live.hooks) return;
     const { raster, tRunMs } = rebaseRasterForDisplay(live.brain);
     const n = live.brain.rate_curves.ALPN.length;
@@ -376,6 +459,7 @@
         channels: PITCH_NAMES,
         values: live.lastChroma || live.playing.chroma_mean,
       },
+      brain_source: "standin",
     };
     const meta = Object.assign({}, live.hooks.meta || {}, {
       t_run_ms: tRunMs,
@@ -393,7 +477,6 @@
         driveAnatomy(sliced || stateData);
       },
     });
-    // Curves already are the live stream — reveal fully
     FE.renderCascade(
       live.hooks.cascadeSvg,
       live.hooks.legendEl,
@@ -403,19 +486,52 @@
     );
     FE.renderRaster(live.hooks.rasterSvg, stateData, meta, { streamFrac: n ? 1 : 0 });
     driveAnatomy(stateData);
+    live.brainSource = "standin";
   }
 
   function driveAnatomy(stateData) {
     if (!live || !live.hooks) return;
     if (typeof live.hooks.driveAnatomy === "function") {
       live.hooks.driveAnatomy(stateData);
-      return;
+    } else {
+      if (live.hooks.skeletonPanel && live.hooks.skeletonPanel.update) {
+        live.hooks.skeletonPanel.update(stateData);
+      }
     }
-    if (live.hooks.skeletonPanel && live.hooks.skeletonPanel.update) {
-      live.hooks.skeletonPanel.update(stateData);
+    pushEyemapChroma();
+  }
+
+  function pushEyemapChroma() {
+    if (!live || !live.hooks || !live.hooks.eyemapPanel) return;
+    const panel = live.hooks.eyemapPanel;
+    const L = global.LoFlyLive;
+    const track = live.playing;
+    if (!track) return;
+
+    // Chromagram image under the playhead: time × 12 pitches (memory window)
+    const t =
+      live.audio && Number.isFinite(live.audio.currentTime)
+        ? live.audio.currentTime
+        : 0;
+    const win = (L && L.MEMORY_SEC) || 7;
+    const slice = (L && L.CHROMA_SLICE_SEC) || 0.2;
+    const n = Math.max(1, Math.round(win / slice));
+    const t0 = Math.max(0, t - win);
+    const data = new Float32Array(n * 12);
+    for (let i = 0; i < n; i++) {
+      const ti = t0 + ((i + 0.5) / n) * Math.min(win, t + 1e-6);
+      const row = L.chromaAtTime(track, ti);
+      for (let p = 0; p < 12; p++) data[i * 12 + p] = Number(row[p]) || 0;
     }
-    if (live.hooks.eyemapPanel && live.hooks.eyemapPanel.update) {
-      live.hooks.eyemapPanel.update(stateData);
+
+    if (typeof panel.setChromaImage === "function") {
+      panel.setChromaImage({ w: n, h: 12, data });
+    } else if (typeof panel.setChromaFields === "function") {
+      panel.setChromaFields({
+        hear: live.lastChroma,
+        court: live.courtGlimpseChroma,
+        eye: live.glanceChroma,
+      });
     }
   }
 
@@ -464,18 +580,97 @@
     }
   }
 
-  function maybeStealAttention() {
+  function maybeStealAttention(hearChroma, courtChroma, eyeChroma) {
     const L = global.LoFlyLive;
-    if (!live.courting || !live.glancing) return;
-    if (live.glancing.pheromone > live.courting.pheromone + L.STICKY_MARGIN) {
-      live.courting = Object.assign({}, live.glancing);
-      live.courtGlimpseChroma = live.glanceChroma;
-      live.switches += 1;
+    if (!live.courting || !live.glancing) return false;
+    let margin = L.STICKY_MARGIN;
+    if (hearChroma && eyeChroma && courtChroma) {
+      const dEye = chromaDist12(hearChroma, eyeChroma);
+      const dCourt = chromaDist12(hearChroma, courtChroma);
+      if (dEye + 0.04 < dCourt) margin *= 0.55;
+      else if (dCourt + 0.04 < dEye) margin *= 1.35;
     }
+    if (live.glancing.pheromone > live.courting.pheromone + margin) {
+      live.courting = Object.assign({}, live.glancing);
+      live.courtGlimpseChroma = eyeChroma || live.glanceChroma;
+      live.switches += 1;
+      return true;
+    }
+    return false;
   }
 
-  /** Bring one new track into view; others stay out of pheromone space. */
-  function takeGlance() {
+  function chromaDist12(a, b) {
+    if (!a || !b) return 0.5;
+    let na = 0,
+      nb = 0,
+      dot = 0;
+    for (let i = 0; i < 12; i++) {
+      const x = Number(a[i]) || 0;
+      const y = Number(b[i]) || 0;
+      na += x * x;
+      nb += y * y;
+      dot += x * y;
+    }
+    na = Math.sqrt(na);
+    nb = Math.sqrt(nb);
+    if (na < 1e-9 || nb < 1e-9) return 0.5;
+    const cos = Math.max(-1, Math.min(1, dot / (na * nb)));
+    return 0.5 * (1 - cos);
+  }
+
+  function pushMemorySample(t) {
+    if (!live) return;
+    live.memory = live.memory || [];
+    live.memory.push({
+      t,
+      hear: (live.lastChroma || []).slice(),
+      court: (live.courtGlimpseChroma || []).slice(),
+      eye: (live.glanceChroma || []).slice(),
+    });
+    const memSec = (global.LoFlyLive && global.LoFlyLive.MEMORY_SEC) || 7;
+    const cutoff = t - memSec;
+    while (live.memory.length && live.memory[0].t < cutoff) live.memory.shift();
+  }
+
+  /** End of 7s window: decide from memory, then bring a new song into sight. */
+  function decideFromMemoryAndGlance(t) {
+    const L = global.LoFlyLive;
+    if (live.memory && live.memory.length && live.courting && live.glancing) {
+      const hearAvg = L.meanChroma(live.memory.map((m) => m.hear));
+      const courtAvg = L.meanChroma(live.memory.map((m) => m.court));
+      const eyeAvg = L.meanChroma(live.memory.map((m) => m.eye));
+      const courtTr = live.tracks[live.courting.track_id];
+      const eyeTr = live.tracks[live.glancing.track_id];
+      if (courtTr) {
+        live.courtGlimpseChroma = courtAvg;
+        live.courting = L.scoreGlance(
+          live.playing,
+          hearAvg,
+          courtTr,
+          courtAvg,
+          live.pc,
+          live.toggles
+        );
+      }
+      if (eyeTr) {
+        live.glanceChroma = eyeAvg;
+        live.glancing = L.scoreGlance(
+          live.playing,
+          hearAvg,
+          eyeTr,
+          eyeAvg,
+          live.pc,
+          live.toggles
+        );
+      }
+      maybeStealAttention(hearAvg, courtAvg, eyeAvg);
+    }
+    live.memory = [];
+    takeGlance(t, { decide: false });
+  }
+
+  /** Bring one new track into view. Decision happens only after MEMORY_SEC. */
+  function takeGlance(t, opts) {
     const L = global.LoFlyLive;
     const ids = L.eligibleIds(live.tracks, excludeSet());
     if (!ids.length) {
@@ -485,8 +680,11 @@
     }
     const id = L.pickRandom(ids, rng);
     const tr = live.tracks[id];
-    live.glanceChroma = L.glimpseChroma(tr, rng);
-    const hear = live.lastChroma || live.playing.chroma_mean;
+    const at = t != null ? t : (live.audio && live.audio.currentTime) || 0;
+    live.glanceStartT = at;
+    live.glanceLocal = 0;
+    live.glanceChroma = L.chromaAtTime(tr, at);
+    const hear = live.lastChroma || L.chromaAtTime(live.playing, at);
     live.glancing = L.scoreGlance(
       live.playing,
       hear,
@@ -496,11 +694,13 @@
       live.toggles
     );
     live.glanceCount = (live.glanceCount || 0) + 1;
-    maybeStealAttention();
+    live.memory = [];
+    if (opts && opts.decide) maybeStealAttention(hear, live.courtGlimpseChroma, live.glanceChroma);
+    pushEyemapChroma();
   }
 
   function onSongProgress() {
-    if (!live || !live.audio) return;
+    if (!live || !live.audio || !live.playing) return;
     const L = global.LoFlyLive;
     const audio = live.audio;
     const dur =
@@ -509,30 +709,59 @@
         : live.playing.duration_s) || 1;
     const t = audio.currentTime;
     const progress = Math.max(0, Math.min(1, t / dur));
-    // Short memory: only this moment of the song
-    live.lastChroma = L.chromaAtProgress(live.playing, progress);
+    const sliceSec = L.CHROMA_SLICE_SEC || 0.2;
+    const memSec = L.MEMORY_SEC || 7;
+
+    // Pass-through playhead chroma (0.2s catalogue slices, lerped). No looping.
+    live.lastChroma = L.chromaAtTime(live.playing, t);
+    if (live.courting) {
+      const ctr = live.tracks[live.courting.track_id];
+      if (ctr) live.courtGlimpseChroma = L.chromaAtTime(ctr, t);
+    }
+    if (live.glancing) {
+      const gtr = live.tracks[live.glancing.track_id];
+      if (gtr) live.glanceChroma = L.chromaAtTime(gtr, t);
+    }
+    live.glanceLocal = Math.max(
+      0,
+      Math.min(0.999, Math.max(0, t - (live.glanceStartT || 0)) / memSec)
+    );
     renderChroma(live.lastChroma);
+    pushEyemapChroma();
+
+    // Pause freezes evaluation — memory, decisions, brain only advance while playing
+    if (audio.paused || audio.ended) {
+      renderHud();
+      return;
+    }
+
     rescoreMoment();
+
+    if (live.lastSliceT == null || t - live.lastSliceT >= sliceSec - 1e-3) {
+      live.lastSliceT = t;
+      pushMemorySample(t);
+    }
+
+    if (live.glanceStartT == null) live.glanceStartT = t;
+    if (t - live.glanceStartT >= memSec - 1e-3) {
+      decideFromMemoryAndGlance(t);
+    }
 
     const drive =
       (live.courting && live.courting.courtship && live.courting.courtship.courtship_drive) ||
       (live.courting && live.courting.pheromone) ||
       0;
-    const rates = instantRates(live.lastChroma, drive, live.playing);
-    const tMs = t * 1000;
-    if (tMs - live.lastBinMs >= BIN_MS - 5) {
-      live.lastBinMs = tMs;
-      appendBrainSample(live.brain, tMs, rates);
-      pushBrainPanels();
+
+    if (!pushBrianPanels(progress, drive)) {
+      const rates = instantRates(live.lastChroma, drive, live.playing);
+      const tMs = t * 1000;
+      if (tMs - live.lastBinMs >= sliceSec * 1000 - 5) {
+        live.lastBinMs = tMs;
+        appendBrainSample(live.brain, tMs, rates);
+        pushStandinPanels();
+      }
     }
 
-    // Serial glances — one other song at a time
-    const glanceEvery = L.GLANCE_SEC || 7;
-    const glanceIdx = Math.floor(t / glanceEvery);
-    while (live.glanceIdx < glanceIdx) {
-      live.glanceIdx += 1;
-      takeGlance();
-    }
     renderHud();
   }
 
@@ -544,19 +773,22 @@
     live.pc.total = (live.pc.total || 0) + 1;
     live.switches = 0;
     live.glanceCount = 0;
-    live.glanceIdx = -1;
     live.glancing = null;
     live.glanceChroma = null;
+    live.glanceStartT = 0;
+    live.glanceLocal = 0;
+    live.memory = [];
+    live.lastSliceT = null;
     live.brain = { rate_curves: emptyCurves(), raster: emptyRaster() };
     live.lastBinMs = -BIN_MS;
-    live.lastChroma = L.chromaAtProgress(track, 0);
+    live.lastChroma = L.chromaAtTime(track, 0);
 
     // Start with one random favorite (not the whole crate ranked)
     const ids = L.eligibleIds(live.tracks, new Set([track.id]));
     if (ids.length) {
       const cid = L.pickRandom(ids, rng);
       const ctr = live.tracks[cid];
-      live.courtGlimpseChroma = L.glimpseChroma(ctr, rng);
+      live.courtGlimpseChroma = L.chromaAtTime(ctr, 0);
       live.courting = L.scoreGlance(
         track,
         live.lastChroma,
@@ -578,8 +810,7 @@
     });
 
     // First glance so pheromone space is hear + court + eye
-    takeGlance();
-    live.glanceIdx = 0;
+    takeGlance(0);
 
     const src = resolveLibraryUrl(track.path);
     const audio = live.audio;
@@ -587,12 +818,20 @@
     audio.load();
     renderChroma(live.lastChroma);
     renderHud();
-    pushBrainPanels();
+    const drive0 =
+      (live.courting && live.courting.courtship && live.courting.courtship.courtship_drive) ||
+      0;
+    if (!pushBrianPanels(0, drive0)) pushStandinPanels();
 
     const hint = document.getElementById("loflyAudioHint");
+    const hasBrian = !!bankEntryFor(track.id);
     const tryPlay = () => {
       audio.play().then(() => {
-        if (hint) hint.textContent = "live · moment chroma · one glance at a time";
+        if (hint) {
+          hint.textContent = hasBrian
+            ? "Brian2 pathway · scrubbed with the song"
+            : "stand-in rates · Brian2 bank missing for this track";
+        }
       }).catch(() => {
         if (hint) hint.textContent = "press play — browser blocked autoplay";
       });
@@ -607,6 +846,17 @@
     loadTrack(next, { autoplay: true });
   }
 
+  function setAnatomyActive(on) {
+    if (!live || !live.hooks) return;
+    const active = !!on;
+    if (live.hooks.skeletonPanel && live.hooks.skeletonPanel.setActive) {
+      live.hooks.skeletonPanel.setActive(active);
+    }
+    if (live.hooks.eyemapPanel && live.hooks.eyemapPanel.setActive) {
+      live.hooks.eyemapPanel.setActive(active);
+    }
+  }
+
   function bindAudio() {
     const audio = live.audio;
     let raf = 0;
@@ -616,15 +866,19 @@
       else raf = 0;
     };
     audio.addEventListener("play", () => {
+      setAnatomyActive(true);
+      pushEyemapChroma();
       if (!raf) raf = requestAnimationFrame(loop);
     });
     audio.addEventListener("pause", () => {
+      setAnatomyActive(false);
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       onSongProgress();
     });
     audio.addEventListener("seeked", onSongProgress);
     audio.addEventListener("ended", () => {
+      setAnatomyActive(false);
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       onSongProgress();
@@ -652,8 +906,12 @@
       hooks.nextBtn.disabled = false;
       hooks.nextBtn.onclick = () => {
         if (!live) return;
-        const ids = Object.keys(live.tracks);
-        const id = ids[Math.floor(Math.random() * ids.length)];
+        const all = Object.keys(live.tracks);
+        const banked = listeningBank
+          ? all.filter((id) => listeningBank.tracks && listeningBank.tracks[id])
+          : [];
+        const pool = banked.length ? banked : all;
+        const id = pool[Math.floor(Math.random() * pool.length)];
         loadTrack(live.tracks[id], { autoplay: true });
       };
       hooks.nextBtn.setAttribute("aria-label", "Random new song");
@@ -680,12 +938,23 @@
       return;
     }
 
+    try {
+      const br = await fetch(LOFLY_BASE + "listening_bank.json");
+      if (br.ok) listeningBank = await br.json();
+    } catch (_) {
+      listeningBank = null;
+    }
+
     const tracks = cat.tracks || {};
     const ids = Object.keys(tracks);
     if (ids.length < 2) {
       hooks.noteEl.textContent = "Need ≥2 catalogued tracks.";
       return;
     }
+
+    const bankIds = listeningBank
+      ? ids.filter((id) => listeningBank.tracks && listeningBank.tracks[id])
+      : [];
 
     live = {
       hooks,
@@ -702,12 +971,16 @@
       courtGlimpseChroma: null,
       glanceChroma: null,
       glanceCount: 0,
-      glanceIdx: -1,
+      glanceStartT: 0,
+      glanceLocal: 0,
+      memory: [],
+      lastSliceT: null,
       ranked: [],
       tick: 0,
       nTicks: 3,
       switches: 0,
       brain: { rate_curves: emptyCurves(), raster: emptyRaster() },
+      brainSource: "standin",
       lastBinMs: -BIN_MS,
       lastChroma: null,
     };
@@ -716,11 +989,13 @@
     wireStepbar(hooks);
 
     if (hooks.tabsEl) {
-      hooks.tabsEl.innerHTML =
-        '<button class="tab active" type="button">live courtship</button>';
+      const nBank = bankIds.length;
+      hooks.tabsEl.innerHTML = `<button class="tab active" type="button">live · Brian2 bank ${nBank}/${ids.length}</button>`;
     }
 
-    const startId = ids[Math.floor(Math.random() * ids.length)];
+    // Prefer a track that already has Brian2 fingerprints
+    const pool = bankIds.length ? bankIds : ids;
+    const startId = pool[Math.floor(Math.random() * pool.length)];
     loadTrack(tracks[startId], { autoplay: true });
   }
 
@@ -735,8 +1010,8 @@
     const n =
       (meta.activity_payload && meta.activity_payload.catalogue_n) || "?";
     return `
-      <div><strong style="color:var(--text)">Live:</strong> hears one song’s <em>current chroma moment</em>, courts one favorite, and glances at one other track at a time (~7s). Only those three occupy pheromone space.</div>
-      <div><strong style="color:var(--text)">Memory:</strong> comparisons use timeline slices, not full-song means — selection is slower and stickier.</div>
+      <div><strong style="color:var(--text)">Live:</strong> chroma follows the playhead (0.2s slices). Pause the song → evaluation freezes. After 7s of playback memory, keep the eye as NEXT or glance elsewhere.</div>
+      <div><strong style="color:var(--text)">Eyemap:</strong> each of ~892 hexes samples a UV tile of the playing chromagram (equal split + overlap). Color = UV spectrum by local pitch; brightness = energy. Follows the playhead.</div>
       <div><strong style="color:var(--text)">Toggles:</strong> prefer complement, novelty, clash penalty, Camelot boost.</div>
       <div><strong style="color:var(--text)">Crate:</strong> ${n} tracks in memory; skip → locks partner; 🎲 new random song.</div>`;
   }
