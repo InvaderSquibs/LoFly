@@ -49,18 +49,35 @@ STICKY_MARGIN = 0.02
 
 @dataclass
 class ScoringToggles:
-    """Optional shaping. Novelty defaults on; clash/boost are A/B extras."""
+    """Optional shaping. Novelty + prefer_complement default on."""
 
     clash_penalty: bool = False
-    novelty: bool = True  # include W_NOVELTY; --no-novelty to drop it
+    novelty: bool = True
     camelot_boost: bool = False
+    prefer_complement: bool = True
 
     def label(self) -> str:
         bits = []
         bits.append("clash" if self.clash_penalty else "no-clash")
         bits.append("novelty" if self.novelty else "no-novelty")
         bits.append("cam-boost" if self.camelot_boost else "no-boost")
+        bits.append("complement" if self.prefer_complement else "allow-same")
         return "+".join(bits)
+
+
+def camelot_flow_score(kind: str, base: float, prefer_complement: bool) -> float:
+    if not prefer_complement:
+        return float(base)
+    table = {
+        "relative": 1.0,
+        "adjacent": 0.97,
+        "diagonal": 0.78,
+        "same": 0.42,
+        "two_apart": 0.28,
+        "clash": 0.12,
+        "unknown": 0.1,
+    }
+    return float(table.get(kind, base * 0.5))
 
 
 def load_catalogue() -> dict:
@@ -157,6 +174,9 @@ def candidate_pheromone(
         "number_delta": None,
         "letter_flip": None,
     }
+    cam_score = camelot_flow_score(
+        cam["kind"], float(cam["score"]), toggles.prefer_complement
+    )
     t_score, t_pct = tempo_score(playing["bpm"], candidate["bpm"])
     nov, fam = novelty_score(candidate["id"], pc, peer_ids)
     cdist = chroma_distance(
@@ -165,10 +185,9 @@ def candidate_pheromone(
     )
     c_flow = chroma_flow(playing, candidate)
 
-    # Familiarity damps courtship drive when novelty is in the blend
     fam_for_court = fam if toggles.novelty else 0.0
     court = courtship_drive(
-        camelot_score=float(cam["score"]),
+        camelot_score=cam_score,
         chroma_dist=cdist,
         tempo_score=t_score,
         play_familiarity=fam_for_court,
@@ -177,16 +196,15 @@ def candidate_pheromone(
 
     if toggles.novelty:
         raw = (
-            W_CAMELOT * float(cam["score"])
+            W_CAMELOT * cam_score
             + W_TEMPO * t_score
             + W_COURTSHIP * drive
             + W_NOVELTY * nov
         )
     else:
-        # Redistribute novelty weight across the other three
         s = W_CAMELOT + W_TEMPO + W_COURTSHIP
         raw = (
-            (W_CAMELOT / s) * float(cam["score"])
+            (W_CAMELOT / s) * cam_score
             + (W_TEMPO / s) * t_score
             + (W_COURTSHIP / s) * drive
         )
@@ -194,8 +212,13 @@ def candidate_pheromone(
     pheromone = raw
     if toggles.clash_penalty and cam["kind"] not in CAMELOT_OK:
         pheromone *= CLASH_PENALTY_FACTOR
-    if toggles.camelot_boost and cam["kind"] in CAMELOT_OK:
-        pheromone *= CAMELOT_BOOST_FACTOR
+    if toggles.camelot_boost:
+        if cam["kind"] in ("relative", "adjacent", "diagonal"):
+            pheromone *= CAMELOT_BOOST_FACTOR
+        elif cam["kind"] == "same" and not toggles.prefer_complement:
+            pheromone *= CAMELOT_BOOST_FACTOR
+    if toggles.prefer_complement and cam["kind"] == "same":
+        pheromone *= 0.85
 
     pheromone = float(max(0.0, min(1.0, pheromone)))
 
@@ -206,7 +229,7 @@ def candidate_pheromone(
         "bpm": candidate["bpm"],
         "pheromone": pheromone,
         "camelot_kind": cam["kind"],
-        "camelot_score": float(cam["score"]),
+        "camelot_score": cam_score,
         "tempo_score": t_score,
         "tempo_delta_pct": t_pct,
         "chroma_flow": float(c_flow),
@@ -494,7 +517,13 @@ def main():
         "--camelot-boost",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Boost Camelot-legal moves in pheromone (default: off)",
+        help="Boost complementary Camelot moves in pheromone (default: off)",
+    )
+    parser.add_argument(
+        "--prefer-complement",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Prefer relative/adjacent over same-key (default: on)",
     )
     args = parser.parse_args()
     run_session(
@@ -506,6 +535,7 @@ def main():
             clash_penalty=args.clash_penalty,
             novelty=args.novelty,
             camelot_boost=args.camelot_boost,
+            prefer_complement=args.prefer_complement,
         ),
     )
 

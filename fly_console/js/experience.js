@@ -47,7 +47,40 @@
     return 0;
   }
 
-  function renderCascade(svgEl, legendEl, stateData, meta) {
+  function stageRateAtFrac(stateData, stage, frac) {
+    const curve = (stateData.rate_curves || {})[stage];
+    if (!curve || !curve.length) return stageMeanRate(stateData, stage);
+    const f = Math.max(0, Math.min(1, Number(frac) || 0));
+    const idx = Math.min(curve.length - 1, Math.floor(f * (curve.length - 1)));
+    return Number(curve[idx]) || 0;
+  }
+
+  /** Snapshot with instantaneous stage rates at stream progress (for skeletons). */
+  function stateAtStreamFrac(stateData, frac) {
+    const f = Math.max(0, Math.min(1, Number(frac) || 0));
+    return {
+      ...stateData,
+      alpn_rate: stageRateAtFrac(stateData, "ALPN", f),
+      kc_rate: stageRateAtFrac(stateData, "Kenyon_Cell", f),
+      mbon_rate: stageRateAtFrac(stateData, "MBON", f),
+      dan_rate: stageRateAtFrac(stateData, "DAN", f),
+    };
+  }
+
+  // Cached so LoFly audio can scrub cascade/raster without re-mounting the activity.
+  let streamCtx = null;
+
+  function setStreamContext(opts) {
+    streamCtx = opts || null;
+  }
+
+  function clampFrac(frac) {
+    if (frac == null || Number.isNaN(Number(frac))) return 0;
+    return Math.max(0, Math.min(1, Number(frac)));
+  }
+
+  function renderCascade(svgEl, legendEl, stateData, meta, opts) {
+    const streamFrac = opts && opts.streamFrac != null ? clampFrac(opts.streamFrac) : null;
     const stages = stagesFrom(meta);
     const labels = stageLabels(meta);
     const tRun = (meta && meta.t_run_ms) || 150;
@@ -83,18 +116,37 @@
     );
     const xAt = (i) => padL + (plotW * i) / Math.max(1, nBins - 1);
     const yAt = (v) => padT + plotH * (1 - v / maxY);
+    const revealEnd =
+      streamFrac == null
+        ? nBins
+        : Math.max(1, Math.floor(streamFrac * (nBins - 1)) + 1);
 
     stages.forEach((s) => {
       const curve = (stateData.rate_curves || {})[s] || [];
       if (!curve.length) return;
       const color = T(STAGE_COLORS[s] || "--cyan");
-      const pts = curve
+      const full = curve
+        .map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`)
+        .join(" ");
+      // Ghost of full trial
+      svgParts.push(
+        `<polyline points="${full}" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.22" stroke-linejoin="round"/>`
+      );
+      const revealed = curve
+        .slice(0, revealEnd)
         .map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`)
         .join(" ");
       svgParts.push(
-        `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8" opacity="0.95" stroke-linejoin="round"/>`
+        `<polyline points="${revealed}" fill="none" stroke="${color}" stroke-width="1.9" opacity="0.95" stroke-linejoin="round"/>`
       );
     });
+
+    if (streamFrac != null) {
+      const x = padL + plotW * streamFrac;
+      svgParts.push(
+        `<line class="stream-playhead" x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${H - padB}" stroke="${T("--gold")}" stroke-width="1.4" opacity="0.9"/>`
+      );
+    }
 
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(tRun * f));
     ticks.forEach((t) => {
@@ -107,19 +159,26 @@
     svgEl.innerHTML = svgParts.join("");
 
     if (legendEl) {
+      const frac = streamFrac == null ? 1 : streamFrac;
       legendEl.innerHTML = stages
         .map((s) => {
-          const hz = stageMeanRate(stateData, s).toFixed(1);
+          const hz = stageRateAtFrac(stateData, s, frac).toFixed(1);
           return `<span><span class="swatch" style="background:${T(STAGE_COLORS[s] || "--cyan")}"></span>${labels[s] || s} &middot; ${hz}Hz</span>`;
         })
         .join("");
+      if (streamFrac != null) {
+        legendEl.innerHTML +=
+          `<span style="color:${T("--text-faint")}">stream ${(streamFrac * 100).toFixed(0)}%</span>`;
+      }
     }
   }
 
-  function renderRaster(svgEl, stateData, meta) {
+  function renderRaster(svgEl, stateData, meta, opts) {
+    const streamFrac = opts && opts.streamFrac != null ? clampFrac(opts.streamFrac) : null;
     const stages = stagesFrom(meta);
     const labels = stageLabels(meta);
     const tRun = (meta && meta.t_run_ms) || 150;
+    const tCut = streamFrac == null ? tRun : streamFrac * tRun;
     const W = 520,
       H = 168,
       padL = 76,
@@ -147,12 +206,20 @@
         const rowY = y0 + 2 + ((bandH - 4) * ri) / n;
         times.forEach((tms) => {
           const x = padL + plotW * (tms / tRun);
+          const heard = tms <= tCut + 1e-6;
           parts.push(
-            `<line x1="${x.toFixed(1)}" y1="${rowY.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(rowY + ((bandH - 4) / n) * 0.9).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="0.85"/>`
+            `<line x1="${x.toFixed(1)}" y1="${rowY.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(rowY + ((bandH - 4) / n) * 0.9).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="${heard ? 0.9 : 0.12}"/>`
           );
         });
       });
     });
+
+    if (streamFrac != null) {
+      const x = padL + plotW * streamFrac;
+      parts.push(
+        `<line class="stream-playhead" x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${H - padB}" stroke="${T("--gold")}" stroke-width="1.4" opacity="0.9"/>`
+      );
+    }
 
     const tickVals = [0, 0.33, 0.66, 1].map((f) => Math.round(tRun * f));
     tickVals.forEach((t) => {
@@ -163,6 +230,33 @@
     });
 
     svgEl.innerHTML = parts.join("");
+  }
+
+  /**
+   * Scrub pathway panels to song progress [0,1].
+   * Maps full song duration onto the trial window (t_run_ms).
+   */
+  function setStreamProgress(frac) {
+    if (!streamCtx || !streamCtx.stateData) return 0;
+    const f = clampFrac(frac);
+    streamCtx.streamFrac = f;
+    const opts = { streamFrac: f };
+    if (streamCtx.cascadeSvg) {
+      renderCascade(
+        streamCtx.cascadeSvg,
+        streamCtx.legendEl,
+        streamCtx.stateData,
+        streamCtx.meta,
+        opts
+      );
+    }
+    if (streamCtx.rasterSvg) {
+      renderRaster(streamCtx.rasterSvg, streamCtx.stateData, streamCtx.meta, opts);
+    }
+    if (streamCtx.onProgress) {
+      streamCtx.onProgress(f, stateAtStreamFrac(streamCtx.stateData, f));
+    }
+    return f;
   }
 
   function renderLearning(svgEl, summaryEl, learning) {
@@ -285,5 +379,9 @@
     renderLearning,
     renderStepControls,
     stageMeanRate,
+    stageRateAtFrac,
+    stateAtStreamFrac,
+    setStreamContext,
+    setStreamProgress,
   };
 })(window);
