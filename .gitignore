@@ -1,0 +1,29 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Huge raw MaleCNS dumps (download locally; not for git)
+connectome-weights-male-cns-v1.0-minconf-0.5.feather
+body-annotations-male-cns-v1.0-minconf-0.5.feather
+body-neurotransmitters-male-cns-v1.0.feather
+
+# LoFly local audio crate (drop your own tracks here; keep the README)
+fly_console/activities/lofly/library/*
+!fly_console/activities/lofly/library/README.md
+
+# Regenerable skeleton fetch cache
+fly_console/data/_swc_cache/
+fly_console/data/_skeleton_fetch.log
+
+# Logs / scratch
+*.log
+extract.log
+singletrial.log

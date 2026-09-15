@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Fly Brain Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/console.css"/>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <div class="kicker" id="kicker">MaleCNS v1.0 · shared pathway evaluation</div>
+      <h1 id="brandTitle">Fly Brain Console</h1>
+      <p id="brandSub">Loading…</p>
+      <div class="activity-switch" id="activitySwitch" aria-label="Activity"></div>
+    </div>
+    <div class="stat-row" id="statRow"></div>
+  </header>
+
+  <section class="panel">
+    <div class="ch-label"><span class="dot" style="background:var(--gold)"></span>CH·EXPERIENCE — stimulus → pathway → readout</div>
+    <h2>Watch the fly experience</h2>
+    <p class="sub">Shared evaluation: ALPN → Kenyon cell → MBON → DAN cascade and spike raster. Activity-specific chrome (board, odor bars, …) sits on the left.</p>
+
+    <div class="tabs" role="tablist" id="episodeTabs"></div>
+
+    <div class="grid2">
+      <div>
+        <div id="activitySlot"></div>
+        <div class="stepbar">
+          <button id="prevBtn" aria-label="Previous step">&larr;</button>
+          <div class="stepdots" id="stepDots"></div>
+          <button id="nextBtn" aria-label="Next step">&rarr;</button>
+          <span class="mono" id="stepLabel" style="font-size:12px;color:var(--text-dim)"></span>
+        </div>
+        <div class="stepnote" id="stepNote"></div>
+      </div>
+
+      <div>
+        <div class="chart-legend" id="cascadeLegend"></div>
+        <svg id="cascadeSvg" viewBox="0 0 520 150" width="100%" height="150" role="img" aria-label="Firing rate over time by processing stage"></svg>
+        <div class="chart-legend" style="margin-top:12px;margin-bottom:4px">
+          <span style="color:var(--text-faint)">spike raster</span>
+        </div>
+        <svg id="rasterSvg" viewBox="0 0 520 168" width="100%" height="168" role="img" aria-label="Spike raster by processing stage"></svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="skeletonPanel">
+    <div class="ch-label"><span class="dot" style="background:var(--cyan)"></span>CH·SKELETONS — traced MaleCNS geometry</div>
+    <h2>Real neuron skeletons</h2>
+    <p class="sub">Decimated SWC traces for the connectome edge set. Brightness follows the same stage rates as the cascade/raster above. <span class="mono" id="skeletonStatus" style="font-size:11px;color:var(--text-faint)"></span></p>
+    <div id="skeletonMount" class="skeleton-mount" role="img" aria-label="3D neuron skeletons"></div>
+  </section>
+
+  <section class="panel" id="eyemapPanel">
+    <div class="ch-label"><span class="dot" style="background:var(--amber)"></span>CH·EYEMAP — optic-lobe columns</div>
+    <h2>Population spatial coverage</h2>
+    <p class="sub">Static anatomical reference (not live firing). Hex columns from <span class="mono">assignedOlHex1/2</span> for optic-lobe intrinsic types.</p>
+    <div class="eyemap-toolbar">
+      <label class="mono" for="eyemapType">type</label>
+      <select id="eyemapType" class="eyemap-select" aria-label="Cell type for hex map"></select>
+      <div class="chart-legend" id="eyemapLegend"></div>
+    </div>
+    <p class="sub" id="eyemapNote" style="margin-top:4px"></p>
+    <div class="eyemap-wrap">
+      <svg id="eyemapSvg" width="100%" height="320" role="img" aria-label="Optic lobe hex column map"></svg>
+    </div>
+  </section>
+
+  <section class="panel" id="learnPanel">
+    <div class="ch-label"><span class="dot" style="background:var(--green)"></span>CH·LEARNING</div>
+    <h2>Learning over episodes</h2>
+    <p class="sub"><span id="lcSummary"></span></p>
+    <div style="overflow-x:auto">
+      <svg id="lcSvg" viewBox="0 0 1080 210" width="100%" height="210" role="img" aria-label="Learning curve across episodes"></svg>
+    </div>
+  </section>
+
+  <details class="panel" open>
+    <summary class="ch-label" style="cursor:pointer;list-style:none">
+      <span class="dot" style="background:var(--text-faint)"></span>About this console
+    </summary>
+    <div id="aboutBody" style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--text-dim);margin-top:8px;line-height:1.45"></div>
+  </details>
+
+  <footer class="foot" id="footerLine">fly_console · MaleCNS v1.0</footer>
+</div>
+
+<script src="js/experience.js"></script>
+<script src="js/skeleton3d.js"></script>
+<script src="js/eyemap.js"></script>
+<script src="js/console.js"></script>
+</body>
+</html>

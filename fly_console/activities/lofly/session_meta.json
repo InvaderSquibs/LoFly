@@ -1,0 +1,12 @@
+{
+  "toggles": {
+    "clash_penalty": false,
+    "novelty": true,
+    "camelot_boost": false
+  },
+  "toggles_label": "no-clash+novelty+no-boost",
+  "seed": 3,
+  "n": 16,
+  "fresh_counts": true,
+  "mode": "dj_flow_pheromone"
+}
