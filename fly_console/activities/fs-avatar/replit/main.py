@@ -196,6 +196,62 @@ def _min_self_body_dist(cell: Dict[str, int], you: Dict[str, Any], skip_tip: boo
     return best if math.isfinite(best) else float("inf")
 
 
+def _body_after_move(you: Dict[str, Any], nxt: Dict[str, int], grow: bool) -> List[Dict[str, int]]:
+    body = [dict(p) for p in (you.get("body") or [])]
+    new_body = [dict(nxt)] + body
+    if not grow and len(new_body) > 1:
+        new_body = new_body[:-1]
+    return new_body
+
+
+def _followup_max_space(
+    board: Dict[str, Any], you: Dict[str, Any], nxt: Dict[str, int], grow: bool
+) -> int:
+    """Best flood after one more step from nxt — catches 1-ply choke entries."""
+    new_body = _body_after_move(you, nxt, grow)
+    you2: Dict[str, Any] = {
+        "id": you.get("id"),
+        "body": new_body,
+        "head": dict(nxt),
+        "length": len(new_body),
+    }
+    snakes = []
+    for s in board.get("snakes") or []:
+        snakes.append(you2 if s.get("id") == you.get("id") else s)
+    board2 = {
+        "width": board["width"],
+        "height": board["height"],
+        "food": board.get("food") or [],
+        "hazards": board.get("hazards") or [],
+        "snakes": snakes,
+    }
+    neck2 = _last_move(you2)
+    # Occupied after first move (tip already handled in new_body).
+    occ: set = set()
+    for s in snakes:
+        for p in s.get("body") or []:
+            occ.add(_key(p))
+    for h in board2.get("hazards") or []:
+        occ.add(_key(h))
+    # Tip of you2 will free on second non-grow step.
+    tip_k = _key(new_body[-1]) if len(new_body) > 1 else None
+    best = 0
+    for m in MOVES:
+        if neck2 and m == OPPOSITE.get(neck2):
+            continue
+        n2 = _add(nxt, DELTA[m])
+        if not _in_bounds(board2, n2):
+            continue
+        k2 = _key(n2)
+        if k2 in occ and k2 != tip_k:
+            continue
+        blocked2 = _blocked_after_move(board2, you2, n2, grow=False)
+        sp = _flood(board2, n2, blocked2)
+        if sp > best:
+            best = sp
+    return best
+
+
 def _flood(board: Dict[str, Any], start: Dict[str, int], blocked: set) -> int:
     if not _in_bounds(board, start) or _key(start) in blocked:
         return 0
@@ -870,7 +926,10 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
         space_score = space / float(board["width"] * board["height"])
         # Late-game: refuse / heavily penalize pockets that can't fit our body
         fit_margin = int(d.get("pocket_fit_margin", 2) or 0)
-        pocket_ok = space >= (next_len + fit_margin)
+        follow_space = _followup_max_space(board, you, nxt, on_food)
+        follow_margin = int(d.get("followup_fit_margin", max(1, fit_margin // 2)) or 1)
+        escape_ok = follow_space >= (next_len + follow_margin)
+        pocket_ok = space >= (next_len + fit_margin) and escape_ok
         # Biting into a pocket that can't fit the grown body — veto unless starving.
         food_pocket_veto = bool(
             on_food
@@ -892,6 +951,29 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
             self_hug = self_hug_w * (1.2 if self_near <= 0 else 1.0)
         elif math.isfinite(self_near) and self_near <= 2:
             self_hug = 0.35 * self_hug_w
+        # When behind/panicking, raw flood + 2-ply escape dominate fruit/cone lure.
+        escape_focus = panic or behind
+        flood_term = 0.0
+        if escape_focus:
+            flood_term = float(d.get("escape_flood_weight", 0.08)) * float(space) + float(
+                d.get("escape_follow_weight", 0.1)
+            ) * float(follow_space)
+        if not escape_ok:
+            flood_term -= float(d.get("dead_end_penalty", 12.0))
+        # Edge hug along the wall is how panic traps closed (game e11da928).
+        wall_dist = min(
+            nxt["x"],
+            nxt["y"],
+            board["width"] - 1 - nxt["x"],
+            board["height"] - 1 - nxt["y"],
+        )
+        wall_term = 0.0
+        if escape_focus:
+            wall_term = float(d.get("escape_wall_weight", 2.2)) * float(wall_dist)
+            if wall_dist <= 0:
+                wall_term -= float(d.get("edge_trap_penalty", 6.0))
+            elif wall_dist <= 1:
+                wall_term -= float(d.get("near_edge_penalty", 2.0))
         cone_score = float(cone_next["ratio"])
         danger_score = cell_danger / max_dim
         vel *= 1.0 - 0.45 * aggression
@@ -942,8 +1024,13 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 + 0.55 * scent_next
             )
         )
+        # Behind/panic: damp fruit chase so escape flood can win.
+        food_escape_scale = float(d.get("escape_food_scale", 0.35)) if escape_focus else 1.0
         row.update(
             space=space,
+            followSpace=follow_space,
+            escapeOk=escape_ok,
+            wallDist=wall_dist,
             coneEmpty=cone_next["empty"],
             foodExclusivity=food_target["exclusivity"],
             entropy=ent_next["entropy"],
@@ -971,9 +1058,13 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
                 + scent_prefer
                 + panic_open
                 + 1.3 * vel
-                + (7.5 + 3.0 * hunger + 2.5 * starve_urgency + excl_term) * food_score
+                + (7.5 + 3.0 * hunger + 2.5 * starve_urgency + excl_term)
+                * food_score
+                * food_escape_scale
                 + 0.45 * courtship * space_score
                 + lead_bonus
+                + flood_term
+                + wall_term
                 - self_hug
             ),
         )
@@ -988,7 +1079,22 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
     non_food_trap = [s for s in legal if not s.get("foodPocketVeto")]
     if non_food_trap:
         legal = non_food_trap
-    legal.sort(key=lambda s: (s["score"], s.get("space") or 0), reverse=True)
+    # Behind/panic or already squeezed: maximize 2-ply escape, space, then stay off edges.
+    if (panic or behind) or not fitting:
+        legal.sort(
+            key=lambda s: (
+                s.get("followSpace") or 0,
+                s.get("space") or 0,
+                s.get("wallDist") or 0,
+                s["score"],
+            ),
+            reverse=True,
+        )
+    else:
+        legal.sort(
+            key=lambda s: (s["score"], s.get("followSpace") or 0, s.get("space") or 0),
+            reverse=True,
+        )
     pick = legal[0]["move"] if legal else OPPOSITE.get(neck or "up", "up")
     pick_sec = legal[0] if legal else None
     eyes_open = pick_sec["retinaOpen"] if pick_sec and "retinaOpen" in pick_sec else here_sectors["open"]

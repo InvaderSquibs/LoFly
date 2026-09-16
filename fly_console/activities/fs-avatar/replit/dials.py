@@ -29,10 +29,10 @@ _DEFAULTS: Dict[str, Any] = {
     "smell_panic_dampen": 0.75,
     "bite_override_panic": True,
     # Early H2H yield (climb handoff: mutual heads ≤ turn 14)
-    "early_game_turns": 18,
-    "early_aggression_cap": 0.4,
+    "early_game_turns": 22,
+    "early_aggression_cap": 0.35,
     "early_food_gate_scale": 1.0,
-    "equal_or_longer_head_threat": 6.5,
+    "equal_or_longer_head_threat": 7.0,
     "shorter_head_threat": 0.35,
     "race_threat_soften": 1.0,
     "food_cell_commits_bite": True,
@@ -44,6 +44,14 @@ _DEFAULTS: Dict[str, Any] = {
     "food_requires_pocket_fit": True,
     "food_pocket_starve_override": 0.7,
     "self_hug_penalty": 2.0,
+    "followup_fit_margin": 3,
+    "escape_flood_weight": 0.08,
+    "escape_follow_weight": 0.1,
+    "escape_food_scale": 0.35,
+    "dead_end_penalty": 12.0,
+    "escape_wall_weight": 2.2,
+    "edge_trap_penalty": 6.0,
+    "near_edge_penalty": 2.0,
 }
 
 _cache: Dict[str, Any] = {}
