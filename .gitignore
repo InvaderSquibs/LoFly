@@ -35,7 +35,7 @@ fly_console/activities/fs-avatar/ladder/dials/cand-*.json
 fly_console/activities/fs-avatar/ladder/dials/archive-*.json
 fly_console/activities/fs-avatar/ladder/dials/leader-*.json
 # Nested publish repo (pushed separately to Walton-LoFly-v0.1)
-fly_console/activities/fs-avatar/replit-publish/.git/
+fly_console/activities/fs-avatar/replit-publish/
 .tmp_*.html
 Claude outputs/
 
