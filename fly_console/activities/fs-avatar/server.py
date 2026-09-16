@@ -311,12 +311,18 @@ def _velocity_threat(
     board: Dict[str, Any],
     you: Dict[str, Any],
     dials: Optional[Dict[str, Any]] = None,
+    hunger: float = 0.0,
 ) -> float:
     d = dials or dials_mod.load_dials()
     threat = 0.0
     my_len = you.get("length") or len(you.get("body") or [])
     eq_threat = float(d.get("equal_or_longer_head_threat", 4.0))
     short_threat = float(d.get("shorter_head_threat", 0.4))
+    # Hunger softens head fear so we still cut toward food instead of only dodging.
+    soft = float(d.get("hunger_threat_soften", 0.5))
+    hunger_scale = max(0.28, 1.0 - soft * max(0.0, min(1.0, hunger)))
+    eq_threat *= hunger_scale
+    short_threat *= max(0.4, hunger_scale)
     for snake in board.get("snakes") or []:
         if snake.get("id") == you.get("id"):
             continue
@@ -327,9 +333,9 @@ def _velocity_threat(
         if vel:
             projected = _add(head, DELTA[vel])
             if _key(projected) == _key(cell):
-                threat += 2.5
+                threat += 2.5 * hunger_scale
             if _manhattan(projected, cell) == 1:
-                threat += 1.2
+                threat += 1.2 * hunger_scale
         if _manhattan(head, cell) == 1:
             their = snake.get("length") or len(snake.get("body") or [])
             threat += eq_threat if their >= my_len else short_threat
@@ -758,13 +764,17 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
     facing = neck or "up"
     blocked = _blocked(board, you)
     health_hunger = max(0.0, min(1.0, (100 - float(you.get("health", 100))) / 100.0))
-    hunger = max(0.92, health_hunger)
+    # Old floor of 0.92 flatlined hunger every turn — health drops never "hit" the drive.
+    d_early = dials_mod.load_dials()
+    hunger_floor = float(d_early.get("hunger_floor", 0.15))
+    hunger_curve = float(d_early.get("hunger_curve", 0.65))  # <1 → hungrier sooner as HP falls
+    hunger = max(hunger_floor, health_hunger ** hunger_curve if health_hunger > 0 else hunger_floor)
     danger_now = _min_danger(head, board, you)
     max_dim = float(max(board["width"], board["height"]))
     size = _relative_size(board, you)
     cone = _forward_cone_empty(board, head, facing, blocked)
     safety = max(0.0, min(1.0, float(cone["ratio"])))
-    d = dials_mod.load_dials()
+    d = d_early
     food_target = _food_race_or_yield(board, you, head, size, d)
     here_entropy = _region_entropy(board, head, facing, blocked)
     here_sectors = _sample_sectors(_build_retina(board, you, facing))
@@ -780,7 +790,8 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
         aggression = min(aggression, float(d.get("early_aggression_cap", aggression)))
     # wiring from dials — spatial scent pocket + attractor
     health = float(you.get("health", 100))
-    starve_urgency = max(0.0, min(1.0, (55.0 - health) / 55.0))
+    starve_start = float(d.get("starve_health_start", 80.0))
+    starve_urgency = max(0.0, min(1.0, (starve_start - health) / max(1.0, starve_start)))
     food_dist_now = (
         food_target["myDist"]
         if food_target["myDist"] is not None
@@ -893,7 +904,7 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
         else:
             food_dist = _nearest_food(nxt, board.get("food") or [])
         food_pull = 0.0 if food_dist is None else 1.0 / (1.0 + food_dist)
-        vel_threat = _velocity_threat(nxt, board, you, d)
+        vel_threat = _velocity_threat(nxt, board, you, d, hunger=hunger)
         if food_target.get("race"):
             vel_threat *= float(d.get("race_threat_soften", 0.85))
         vel = -vel_threat
@@ -1104,7 +1115,7 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
     non_food_trap = [s for s in legal if not s.get("foodPocketVeto")]
     if non_food_trap:
         legal = non_food_trap
-    # Behind/panic or already squeezed: never demote a safe food bite; then maximize escape.
+    # Behind/panic: prefer safe food, then avoid H2H cells when smaller, then escape metrics.
     if (panic or behind) or not fitting:
         legal.sort(
             key=lambda s: (
@@ -1115,10 +1126,18 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
                     and not s.get("foodPocketVeto")
                 )
                 else 0,
+                # Don't walk into equal/longer heads while escaping unless it's the berry.
+                1
+                if (
+                    (s.get("snakeDanger") is None or float(s.get("snakeDanger")) > 1)
+                    or s.get("onFood")
+                    or dominant
+                )
+                else 0,
                 s.get("followSpace") or 0,
                 s.get("space") or 0,
-                s.get("wallDist") or 0,
                 s["score"],
+                s.get("wallDist") or 0,
             ),
             reverse=True,
         )
