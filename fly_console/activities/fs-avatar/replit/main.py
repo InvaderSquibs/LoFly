@@ -531,18 +531,25 @@ def _orchard_scent(board: Dict[str, Any], head: Dict[str, int]) -> Dict[str, Any
 
 
 def _food_race_or_yield(
-    board: Dict[str, Any], you: Dict[str, Any], head: Dict[str, int], size: Dict[str, Any]
+    board: Dict[str, Any],
+    you: Dict[str, Any],
+    head: Dict[str, int],
+    size: Dict[str, Any],
+    dials: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Race only with a real length lead + uncontested fruit; no equal-length race_force."""
+    """Race with a length lead; when behind/equal, catch-up seek nearest fruit (don't starve in yield)."""
+    d = dials or dials_mod.load_dials()
     base = _food_courtship_targets(board, you, head)
     ranked = base.get("ranked") or []
     if not ranked:
         out = dict(base)
         out.update(mode="none", race=False)
         return out
-    can_race = (
-        int(size.get("length_you") or 0) > int(size.get("length_max_rival") or 0)
-        and (float(size.get("size_advantage") or 0) >= 0.55 or float(size.get("size_lead") or 0) > 0)
+    my_len = int(size.get("length_you") or 0)
+    rival = int(size.get("length_max_rival") or 0)
+    len_gap = rival - my_len
+    can_race = my_len > rival and (
+        float(size.get("size_advantage") or 0) >= 0.55 or float(size.get("size_lead") or 0) > 0
     )
     if can_race:
         raceable = sorted(
@@ -565,6 +572,24 @@ def _food_race_or_yield(
         out = dict(base)
         out.update(mode="yield_contested", race=False)
         return out
+    # Behind or parity: hunt food or SmartyTree outgrows us while we "skip contested fruit".
+    catchup_gap = int(d.get("catchup_len_gap", 2) or 2)
+    seek = bool(d.get("catchup_seek_food", True)) and (
+        len_gap >= catchup_gap or my_len <= rival
+    )
+    if seek:
+        pick = sorted(ranked, key=lambda r: (r["myDist"], -r["exclusivity"]))[0]
+        return {
+            "preferred": pick["food"],
+            "exclusivity": pick["exclusivity"],
+            "contested": pick["contest"] >= 1.0,
+            "myDist": pick["myDist"],
+            "rivalsCloser": pick["rivalsCloser"],
+            "rivalsHeading": pick["rivalsHeading"],
+            "ranked": ranked,
+            "mode": "catchup",
+            "race": True,
+        }
     out = dict(base)
     out.update(mode="yield", race=False)
     return out
@@ -739,7 +764,8 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
     size = _relative_size(board, you)
     cone = _forward_cone_empty(board, head, facing, blocked)
     safety = max(0.0, min(1.0, float(cone["ratio"])))
-    food_target = _food_race_or_yield(board, you, head, size)
+    d = dials_mod.load_dials()
+    food_target = _food_race_or_yield(board, you, head, size, d)
     here_entropy = _region_entropy(board, head, facing, blocked)
     here_sectors = _sample_sectors(_build_retina(board, you, facing))
     courtship = (
@@ -747,7 +773,6 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
         * (0.35 + 0.3 * min(1.0, danger_now / (max_dim * 0.4)))
         * (0.4 + 0.35 * food_target["exclusivity"] + 0.25 * here_entropy["entropy"])
     )
-    d = dials_mod.load_dials()
     aggression = 0.5 + 0.5 * size["size_advantage"]
     turn = int(game_state.get("turn") or 0)
     early = turn < int(d.get("early_game_turns", 0) or 0)
@@ -1025,7 +1050,7 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
             )
         )
         # Behind/panic: damp fruit chase so escape flood can win.
-        food_escape_scale = float(d.get("escape_food_scale", 0.35)) if escape_focus else 1.0
+        food_escape_scale = float(d.get("escape_food_scale", 0.85)) if escape_focus else 1.0
         row.update(
             space=space,
             followSpace=follow_space,
@@ -1079,10 +1104,17 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
     non_food_trap = [s for s in legal if not s.get("foodPocketVeto")]
     if non_food_trap:
         legal = non_food_trap
-    # Behind/panic or already squeezed: maximize 2-ply escape, space, then stay off edges.
+    # Behind/panic or already squeezed: never demote a safe food bite; then maximize escape.
     if (panic or behind) or not fitting:
         legal.sort(
             key=lambda s: (
+                1
+                if (
+                    s.get("onFood")
+                    and s.get("pocketOk")
+                    and not s.get("foodPocketVeto")
+                )
+                else 0,
                 s.get("followSpace") or 0,
                 s.get("space") or 0,
                 s.get("wallDist") or 0,
@@ -1117,6 +1149,8 @@ def decide(game_state: Dict[str, Any]) -> Dict[str, Any]:
         shout = "eyes say danger"
     elif open_wins and not food_target.get("race"):
         shout = "eyes say space"
+    elif food_target.get("mode") == "catchup":
+        shout = "catchup — hunt fruit"
     elif food_target.get("race"):
         shout = "racing fruit — bigger"
     elif food_target["exclusivity"] > 0.7 and not food_target["contested"]:
