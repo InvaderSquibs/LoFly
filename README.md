@@ -28,6 +28,8 @@ Open:
 - [http://localhost:8000/?activity=lofly](http://localhost:8000/?activity=lofly) — **LoFly (Bug DJ)**
 - [http://localhost:8000/?activity=ttt](http://localhost:8000/?activity=ttt) — tic-tac-toe
 - [http://localhost:8000/?activity=perception](http://localhost:8000/?activity=perception) — odor perception
+- [http://localhost:8000/?activity=fx](http://localhost:8000/?activity=fx) — **FX** (Gherkin form QA)
+- [http://localhost:8000/?activity=fs-avatar](http://localhost:8000/?activity=fs-avatar) — **FS-Avatar** (Battlesnake pilot)
 
 Use the activity switcher in the header, or step through episodes with ← / →.
 
@@ -40,6 +42,26 @@ Each activity lives under `fly_console/activities/<id>/`:
 | LoFly | `lofly` | Hear a track, court the crate via multi-factor “pheromone” (Camelot / chroma / novelty) |
 | Tic-tac-toe | `ttt` | Connectome-driven board play |
 | Odor perception | `perception` | Stimulus → pathway → odor readout |
+| FX | `fx` | Gherkin → live DOM perception → act on FlyMart (click / type / select / assert); animated fly cursor |
+| FS-Avatar | `fs-avatar` | Battlesnake pilot — policy `/move`, fly joystick theater, gold snake = YOU; signals for later neuron wiring |
+
+### FS-Avatar (Battlesnake)
+
+Real webhook + console theater — not a stub.
+
+```bash
+# terminal 1 — Battlesnake API
+cd fly_console/activities/fs-avatar
+python3 server.py          # http://127.0.0.1:8001
+
+# terminal 2 — install CLI once, then play (or use console “Start real game”)
+go install github.com/BattlesnakeOfficial/rules/cli/battlesnake@latest
+./play.sh                  # solo game against your snake
+```
+
+Console: [http://localhost:8000/?activity=fs-avatar](http://localhost:8000/?activity=fs-avatar) — **Start real game** calls `POST /dev/play`; the fly joystick mirrors each live `/move`. Local sim remains available for offline tinkering.
+
+For Funathon / play.battlesnake.com, deploy the same `server.py` (Replit etc.) and register the URL — display name must include your last name.
 
 ### LoFly extras
 
@@ -90,3 +112,11 @@ python3 activities/export_all.py            # refresh all activity experience.js
 ## License / data
 
 Experiment code is yours to extend. MaleCNS / FlyWire-derived data retain their upstream licenses — cite the original releases when publishing results. Audio in `library/` is not shipped with this repo.
+
+## FX Chrome extension
+
+Portable Gherkin + fly runner for any website:
+
+- Folder: [`fx_extension/`](fx_extension/)
+- Load unpacked from `chrome://extensions` (see that README)
+

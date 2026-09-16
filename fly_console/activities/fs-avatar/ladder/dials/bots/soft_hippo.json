@@ -1,0 +1,19 @@
+{
+  "id": "bot-soft-hippo",
+  "role": "hippo-lite",
+  "wiring": "retina_sectors_v1_orchard",
+  "notes": "Gentle grower — soft rung third seat",
+  "panic_food_gate": 0.3,
+  "panic_safety_thresh": 0.3,
+  "panic_danger_thresh": 1.5,
+  "starve_blocks_panic_above": 0.45,
+  "fruit_hard_danger": 1.25,
+  "fruit_soft_danger": 2.5,
+  "fruit_soft_scale": 0.3,
+  "wall_counts_as_danger": true,
+  "undersized_food_gate": 0.75,
+  "race_food_gate": 1.1,
+  "exclusive_near_boost": 1.05,
+  "smell_panic_dampen": 0.25,
+  "bite_override_panic": true
+}

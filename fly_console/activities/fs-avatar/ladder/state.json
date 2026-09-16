@@ -1,0 +1,13 @@
+{
+  "leader_dials_id": "leader-v0.3-bite-smell",
+  "leader_dials_path": "dials/leader.json",
+  "best_streak": 0,
+  "current_streak": 0,
+  "current_tier_index": 0,
+  "phase": "replay_after_rung4",
+  "active_climb_id": "climb-20260916T014521Z",
+  "candidate_id": null,
+  "history": [],
+  "ladder_format": "11x11 trio \u00b7 escalate bot packs",
+  "handoff_notes": "early H2H yield; Claude replay Rung 1 Hungry/Scared/Loopy"
+}

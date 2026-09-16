@@ -24,6 +24,16 @@
       liveScoring: "activities/lofly/live_scoring.js",
       label: "LoFly (Bug DJ)",
     },
+    fx: {
+      data: "activities/fx/experience.json",
+      module: "activities/fx/activity.js",
+      label: "FX (form QA)",
+    },
+    "fs-avatar": {
+      data: "activities/fs-avatar/experience.json",
+      module: "activities/fs-avatar/activity.js",
+      label: "FS-Avatar (snake)",
+    },
   };
 
   function qsActivity() {
@@ -35,7 +45,7 @@
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = src;
+      s.src = src + (src.indexOf("?") >= 0 ? "&" : "?") + "_=" + Date.now();
       s.onload = resolve;
       s.onerror = () => reject(new Error("Failed to load " + src));
       document.head.appendChild(s);
@@ -82,10 +92,14 @@
 
     const meta = replay.meta || {};
     document.getElementById("brandTitle").textContent = meta.title || "Fly Brain Console";
-    document.getElementById("brandSub").textContent =
+      document.getElementById("brandSub").textContent =
       activityId === "lofly"
         ? "Live DJ set — random start, court while the song plays, brain activity streams with the audio."
-        : meta.subtitle || "";
+        : activityId === "fx"
+          ? "Live Gherkin QA — the fly perceives FlyMart’s DOM, then clicks / types / checks out."
+          : activityId === "fs-avatar"
+            ? "Live Battlesnake pilot — fly decides /move, shoves the joystick; gold snake is YOU."
+            : meta.subtitle || "";
     document.getElementById("kicker").textContent =
       `MaleCNS v1.0 · ${meta.activity_id || activityId} · shared pathway evaluation`;
 
@@ -107,16 +121,20 @@
     }
 
     const learnPanel = document.getElementById("learnPanel");
-    if (!replay.learning || activityId === "lofly") {
+    if (!replay.learning || activityId === "lofly" || activityId === "fx" || activityId === "fs-avatar") {
       learnPanel.querySelector(".sub").textContent =
         activityId === "lofly"
           ? "Live set — learning curve stays from the last offline export (optional)."
-          : "This activity has no online learning series; pathway dynamics above are still the same evaluation.";
+          : activityId === "fx"
+            ? "Live FX run — learning curve comes later once scenarios accumulate pass/fail history."
+            : activityId === "fs-avatar"
+              ? "Live FS-Avatar — neuron wiring comes next from courtship / danger / food signals during play."
+              : "This activity has no online learning series; pathway dynamics above are still the same evaluation.";
     }
     FlyExperience.renderLearning(
       document.getElementById("lcSvg"),
       document.getElementById("lcSummary"),
-      activityId === "lofly" ? null : replay.learning
+      activityId === "lofly" || activityId === "fx" || activityId === "fs-avatar" ? null : replay.learning
     );
 
     let skeletonPanel = null;

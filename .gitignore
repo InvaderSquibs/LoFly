@@ -27,3 +27,15 @@ fly_console/data/_skeleton_fetch.log
 *.log
 extract.log
 singletrial.log
+fly_console/activities/fs-avatar/logs/
+fly_console/activities/fs-avatar/ladder/runs/
+fly_console/activities/fs-avatar/ladder/win_track.json
+fly_console/activities/fs-avatar/ladder/win_track.csv
+fly_console/activities/fs-avatar/ladder/dials/cand-*.json
+fly_console/activities/fs-avatar/ladder/dials/archive-*.json
+fly_console/activities/fs-avatar/ladder/dials/leader-*.json
+# Nested publish repo (pushed separately to Walton-LoFly-v0.1)
+fly_console/activities/fs-avatar/replit-publish/.git/
+.tmp_*.html
+Claude outputs/
+

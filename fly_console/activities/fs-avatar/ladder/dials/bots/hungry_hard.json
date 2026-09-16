@@ -1,0 +1,19 @@
+{
+  "id": "bot-hungry-hard",
+  "role": "hungry-hard",
+  "wiring": "retina_sectors_v1_orchard",
+  "notes": "Food-forward hard rung",
+  "panic_food_gate": 0.55,
+  "panic_safety_thresh": 0.18,
+  "panic_danger_thresh": 0.75,
+  "starve_blocks_panic_above": 0.65,
+  "fruit_hard_danger": 0.75,
+  "fruit_soft_danger": 1.5,
+  "fruit_soft_scale": 0.55,
+  "wall_counts_as_danger": false,
+  "undersized_food_gate": 1.0,
+  "race_food_gate": 1.5,
+  "exclusive_near_boost": 1.3,
+  "smell_panic_dampen": 0.5,
+  "bite_override_panic": true
+}

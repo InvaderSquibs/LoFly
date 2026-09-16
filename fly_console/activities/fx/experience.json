@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "activity_id": "fx",
+    "title": "FX · Fly Experience",
+    "subtitle": "Gherkin runner with live DOM perception on FlyMart — find, click, type, select, assert.",
+    "t_run_ms": 150.0,
+    "bin_ms": 3.0,
+    "stages": ["ALPN", "Kenyon_Cell", "MBON", "DAN"],
+    "stage_labels": {
+      "ALPN": "ALPN (look)",
+      "Kenyon_Cell": "Kenyon cell",
+      "MBON": "MBON",
+      "DAN": "DAN (QA reward)"
+    },
+    "n_episodes": 1,
+    "wins": 1,
+    "losses": 0,
+    "win_rate": 1.0,
+    "stats": [
+      {"label": "Mode", "value": "live"},
+      {"label": "Site", "value": "FlyMart"},
+      {"label": "Sight", "value": "DOM", "kind": "win"}
+    ],
+    "activity_payload": {
+      "bug_name": "FX",
+      "bug_role": "fly QA · Gherkin → perceive → act",
+      "feature": "features/flymart_checkout.feature"
+    }
+  },
+  "states": {
+    "fx_idle": {
+      "rate_curves": {
+        "ALPN": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "Kenyon_Cell": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "MBON": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "DAN": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "raster": {"ALPN": [], "Kenyon_Cell": [], "MBON": [], "DAN": []},
+      "alpn_rate": 0,
+      "kc_rate": 0,
+      "mbon_rate": 0,
+      "dan_rate": 0
+    }
+  },
+  "episodes": [
+    {
+      "id": "fx_flymart_checkout",
+      "outcome": "win",
+      "step_state_ids": ["fx_idle"],
+      "note": "FlyMart checkout",
+      "activity_payload": {"feature": "flymart_checkout.feature"}
+    }
+  ],
+  "learning": null
+}

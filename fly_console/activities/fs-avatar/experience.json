@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "activity_id": "fs-avatar",
+    "title": "FS-Avatar · Fly Snake",
+    "subtitle": "Fly steers Battlesnake via /move policy — joystick theater, gold snake is YOU.",
+    "t_run_ms": 150.0,
+    "bin_ms": 3.0,
+    "stages": ["ALPN", "Kenyon_Cell", "MBON", "DAN"],
+    "stage_labels": {
+      "ALPN": "ALPN (threat)",
+      "Kenyon_Cell": "Kenyon cell",
+      "MBON": "MBON (space)",
+      "DAN": "DAN (food/court)"
+    },
+    "n_episodes": 1,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "stats": [
+      {"label": "Mode", "value": "live"},
+      {"label": "Snake", "value": "Walton-FS"},
+      {"label": "Control", "value": "API", "kind": "win"}
+    ],
+    "activity_payload": {
+      "bug_name": "FS-Avatar",
+      "bug_role": "Battlesnake pilot · policy → joystick theater",
+      "you_name": "Walton-FS",
+      "neuron_hooks": ["courtship_pC1", "courtship_vPR6", "ALPN", "DAN", "MBON", "DAN_risk", "aSPIC"]
+    }
+  },
+  "states": {
+    "fs_idle": {
+      "rate_curves": {
+        "ALPN": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "Kenyon_Cell": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "MBON": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "DAN": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "raster": {"ALPN": [], "Kenyon_Cell": [], "MBON": [], "DAN": []},
+      "alpn_rate": 0,
+      "kc_rate": 0,
+      "mbon_rate": 0,
+      "dan_rate": 0
+    }
+  },
+  "episodes": [
+    {
+      "id": "fs_local_demo",
+      "outcome": "win",
+      "step_state_ids": ["fs_idle"],
+      "note": "Local Battlesnake-like sim",
+      "activity_payload": {"mode": "local"}
+    }
+  ],
+  "learning": null
+}

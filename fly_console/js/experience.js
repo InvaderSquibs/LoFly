@@ -125,13 +125,16 @@
       const curve = (stateData.rate_curves || {})[s] || [];
       if (!curve.length) return;
       const color = T(STAGE_COLORS[s] || "--cyan");
-      const full = curve
-        .map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`)
-        .join(" ");
-      // Ghost of full trial
-      svgParts.push(
-        `<polyline points="${full}" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.22" stroke-linejoin="round"/>`
-      );
+      // Live stream: only draw what the playhead has reached (no ghost of the future).
+      // Replay / full trial: optional faint full path underneath.
+      if (streamFrac == null) {
+        const full = curve
+          .map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`)
+          .join(" ");
+        svgParts.push(
+          `<polyline points="${full}" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.22" stroke-linejoin="round"/>`
+        );
+      }
       const revealed = curve
         .slice(0, revealEnd)
         .map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`)
@@ -168,7 +171,7 @@
         .join("");
       if (streamFrac != null) {
         legendEl.innerHTML +=
-          `<span style="color:${T("--text-faint")}">stream ${(streamFrac * 100).toFixed(0)}%</span>`;
+          `<span style="color:${T("--text-faint")}">playhead ${(streamFrac * 100).toFixed(0)}% · head only</span>`;
       }
     }
   }
@@ -205,10 +208,10 @@
         const times = row && row.t ? row.t : Array.isArray(row) ? row : [];
         const rowY = y0 + 2 + ((bandH - 4) * ri) / n;
         times.forEach((tms) => {
+          if (streamFrac != null && tms > tCut + 1e-6) return; // head only — no future spikes
           const x = padL + plotW * (tms / tRun);
-          const heard = tms <= tCut + 1e-6;
           parts.push(
-            `<line x1="${x.toFixed(1)}" y1="${rowY.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(rowY + ((bandH - 4) / n) * 0.9).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="${heard ? 0.9 : 0.12}"/>`
+            `<line x1="${x.toFixed(1)}" y1="${rowY.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(rowY + ((bandH - 4) / n) * 0.9).toFixed(1)}" stroke="${color}" stroke-width="1" opacity="0.9"/>`
           );
         });
       });

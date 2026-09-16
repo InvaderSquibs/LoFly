@@ -1,0 +1,2 @@
+# Stdlib-only Battlesnake webhook — no pip deps required.
+# Kept so Replit's package resolver is happy.

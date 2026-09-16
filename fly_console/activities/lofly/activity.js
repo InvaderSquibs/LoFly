@@ -7,12 +7,9 @@
 
   const LOFLY_BASE = "activities/lofly/";
   const PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const BIN_MS = 250;
-  const MAX_BINS = 480;
-  const BRIAN_T_RUN_MS = 150;
+  const SLICE_SEC = 0.2; // live pathway sample rate (matches chroma slices)
 
   let live = null;
-  let listeningBank = null; // { tracks: { id: { quiet, hot, hot_drive } } }
 
   function tok(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -65,7 +62,7 @@
     }
   }
 
-  /** Instantaneous pathway rates from chroma + courtship drive. */
+  /** Instantaneous pathway rates from chroma + courtship drive (live, at the head). */
   function instantRates(chroma, drive, track) {
     const energy =
       chroma.reduce((a, b) => a + Number(b) || 0, 0) / Math.max(chroma.length, 1);
@@ -80,44 +77,115 @@
     };
   }
 
-  function appendBrainSample(state, tMs, rates) {
-    const stages = ["ALPN", "Kenyon_Cell", "MBON", "DAN"];
-    stages.forEach((s) => {
-      state.rate_curves[s].push(Math.round(rates[s] * 10) / 10);
-      if (state.rate_curves[s].length > MAX_BINS) state.rate_curves[s].shift();
-    });
-    // Sparse Poisson-ish spikes into raster at this time
-    stages.forEach((s) => {
-      ensureRasterRows(state.raster, s, 18);
-      const p = Math.min(0.75, rates[s] / 280);
-      state.raster[s].forEach((row) => {
-        if (Math.random() < p * 0.35) {
-          row.t.push(Math.round(tMs * 10) / 10);
-          if (row.t.length > 40) row.t.shift();
-        }
-        // Drop spikes older than window
-        const t0 = Math.max(0, tMs - MAX_BINS * BIN_MS);
-        row.t = row.t.filter((x) => x >= t0);
-      });
-    });
-    // Re-base spike times so raster x-axis matches curve length window
-    const tBase = Math.max(0, tMs - (state.rate_curves.ALPN.length - 1) * BIN_MS);
-    state._tBase = tBase;
-    state._tEnd = tMs;
+  function songDurationS() {
+    if (!live || !live.playing) return 1;
+    const audio = live.audio;
+    if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
+      return audio.duration;
+    }
+    return Number(live.playing.duration_s) || 1;
   }
 
-  function rebaseRasterForDisplay(state) {
-    // FlyExperience maps spike times with t / t_run_ms. Set t_run to window.
-    const t0 = state._tBase || 0;
-    const t1 = state._tEnd || BIN_MS;
-    const out = {};
-    Object.keys(state.raster).forEach((s) => {
-      out[s] = (state.raster[s] || []).map((row, i) => ({
-        n: i,
-        t: (row.t || []).map((tm) => Math.max(0, tm - t0)),
-      }));
+  function ensureLiveBrain(durS) {
+    const nBins = Math.max(1, Math.ceil(durS / SLICE_SEC));
+    if (live.brain.nBins === nBins && live.brain.rate_curves.ALPN.length === nBins) {
+      return nBins;
+    }
+    live.brain.nBins = nBins;
+    live.brain.rate_curves = {
+      ALPN: Array(nBins).fill(0),
+      Kenyon_Cell: Array(nBins).fill(0),
+      MBON: Array(nBins).fill(0),
+      DAN: Array(nBins).fill(0),
+    };
+    live.brain.raster = emptyRaster();
+    live.brain.lastBinIdx = -1;
+    return nBins;
+  }
+
+  /** Process pathway at the playhead only — fills song-length buffers up to now. */
+  function processBrainAtHead(t, chroma, drive) {
+    const dur = songDurationS();
+    const nBins = ensureLiveBrain(dur);
+    const idx = Math.max(0, Math.min(nBins - 1, Math.floor(t / SLICE_SEC)));
+    const rates = instantRates(chroma, drive, live.playing);
+    const stages = ["ALPN", "Kenyon_Cell", "MBON", "DAN"];
+
+    // Seeking backward: wipe the future so we don't keep unheard experience
+    if (live.brain.lastBinIdx >= 0 && idx < live.brain.lastBinIdx) {
+      for (let i = idx + 1; i <= live.brain.lastBinIdx; i++) {
+        stages.forEach((s) => {
+          live.brain.rate_curves[s][i] = 0;
+        });
+      }
+      const tCut = (idx + 1) * SLICE_SEC * 1000;
+      stages.forEach((s) => {
+        (live.brain.raster[s] || []).forEach((row) => {
+          row.t = (row.t || []).filter((tm) => tm <= tCut);
+        });
+      });
+    }
+
+    const from = live.brain.lastBinIdx < 0 ? idx : live.brain.lastBinIdx + 1;
+    for (let i = from; i <= idx; i++) {
+      stages.forEach((s) => {
+        live.brain.rate_curves[s][i] = Math.round(rates[s] * 10) / 10;
+      });
+      const tMs = i * SLICE_SEC * 1000;
+      stages.forEach((s) => {
+        ensureRasterRows(live.brain.raster, s, 14);
+        const p = Math.min(0.75, rates[s] / 280);
+        live.brain.raster[s].forEach((row) => {
+          if (Math.random() < p * 0.35) {
+            row.t.push(Math.round(tMs * 10) / 10);
+            if (row.t.length > 60) row.t.shift();
+          }
+        });
+      });
+    }
+    live.brain.lastBinIdx = idx;
+    pushLivePanels(Math.max(0, Math.min(1, t / dur)), dur * 1000);
+  }
+
+  function pushLivePanels(songFrac, durMs) {
+    if (!live || !live.hooks) return;
+    const last = (s) => {
+      const i = live.brain.lastBinIdx;
+      if (i < 0) return 0;
+      return live.brain.rate_curves[s][i] || 0;
+    };
+    const stateData = {
+      rate_curves: live.brain.rate_curves,
+      raster: live.brain.raster,
+      alpn_rate: last("ALPN"),
+      kc_rate: last("Kenyon_Cell"),
+      mbon_rate: last("MBON"),
+      dan_rate: last("DAN"),
+      stimulus: {
+        channels: PITCH_NAMES,
+        values: live.lastChroma || live.playing.chroma_mean,
+      },
+      brain_source: "live",
+    };
+    const meta = Object.assign({}, live.hooks.meta || {}, {
+      t_run_ms: Math.max(SLICE_SEC * 1000, durMs),
+      bin_ms: SLICE_SEC * 1000,
     });
-    return { raster: out, tRunMs: Math.max(BIN_MS, t1 - t0) };
+    const FE = global.FlyExperience;
+    if (!FE) return;
+    FE.setStreamContext({
+      cascadeSvg: live.hooks.cascadeSvg,
+      rasterSvg: live.hooks.rasterSvg,
+      legendEl: live.hooks.legendEl,
+      stateData,
+      meta,
+      onProgress: (_f, sliced) => {
+        driveAnatomy(sliced || stateData);
+      },
+    });
+    // Full-song axis; only the playhead prefix is drawn
+    FE.setStreamProgress(songFrac);
+    live.brainSource = "live";
   }
 
   function ensureChrome(slot) {
@@ -254,9 +322,7 @@
         <span class="lofly-badge">${escapeHtml(playing.camelot)}</span>
         <span class="lofly-bpm">${fmtBpm(playing.bpm)}</span>
       </div>
-      <div class="lofly-bpm">${Number(playing.duration_s).toFixed(0)}s · real 0.2s chroma · 7s memory · glances ${glanceCount || 0} · ${
-        live.brainSource === "brian2" ? "Brian2" : "stand-in"
-      }</div>`;
+      <div class="lofly-bpm">${Number(playing.duration_s).toFixed(0)}s · real 0.2s chroma · 7s memory · glances ${glanceCount || 0} · live head</div>`;
 
     document.getElementById("loflyCourting").innerHTML = courting
       ? `<div class="lofly-row">
@@ -359,134 +425,6 @@
       )}</span>
         <span class="outcome-pill win">ON</span>`;
     }
-  }
-
-  function lerp(a, b, t) {
-    return a + (b - a) * t;
-  }
-
-  function blendSims(quiet, hot, drive, hotDrive) {
-    const t = Math.max(0, Math.min(1, drive / Math.max(0.01, hotDrive || 0.75)));
-    const stages = ["ALPN", "Kenyon_Cell", "MBON", "DAN"];
-    const rate_curves = {};
-    stages.forEach((s) => {
-      const a = (quiet.rate_curves && quiet.rate_curves[s]) || [];
-      const b = (hot.rate_curves && hot.rate_curves[s]) || [];
-      const n = Math.max(a.length, b.length);
-      const out = [];
-      for (let i = 0; i < n; i++) {
-        out.push(Math.round(lerp(a[i] || 0, b[i] || 0, t) * 10) / 10);
-      }
-      rate_curves[s] = out;
-    });
-    // Prefer hot raster when drive high (real Brian2 spikes)
-    const raster = t >= 0.45 ? hot.raster || quiet.raster : quiet.raster || hot.raster;
-    return {
-      rate_curves,
-      raster: raster || {},
-      alpn_rate: lerp(quiet.alpn_rate || 0, hot.alpn_rate || 0, t),
-      kc_rate: lerp(quiet.kc_rate || 0, hot.kc_rate || 0, t),
-      mbon_rate: lerp(quiet.mbon_rate || 0, hot.mbon_rate || 0, t),
-      dan_rate: lerp(quiet.dan_rate || 0, hot.dan_rate || 0, t),
-      source: "brian2",
-      blend: t,
-    };
-  }
-
-  function bankEntryFor(trackId) {
-    if (!listeningBank || !listeningBank.tracks) return null;
-    return listeningBank.tracks[trackId] || null;
-  }
-
-  /** Push Brian2 curves scrubbed to song progress (real subgraph activity). */
-  function pushBrianPanels(songFrac, drive) {
-    if (!live || !live.hooks || !live.playing) return false;
-    const entry = bankEntryFor(live.playing.id);
-    if (!entry || !entry.quiet || !entry.hot) return false;
-
-    const blended = blendSims(entry.quiet, entry.hot, drive, entry.hot_drive);
-    const frac = Math.max(0, Math.min(1, songFrac));
-    const stateData = {
-      rate_curves: blended.rate_curves,
-      raster: blended.raster,
-      alpn_rate: blended.alpn_rate,
-      kc_rate: blended.kc_rate,
-      mbon_rate: blended.mbon_rate,
-      dan_rate: blended.dan_rate,
-      stimulus: {
-        channels: PITCH_NAMES,
-        values: live.lastChroma || live.playing.chroma_mean,
-      },
-      brain_source: "brian2",
-    };
-    const meta = Object.assign({}, live.hooks.meta || {}, {
-      t_run_ms: BRIAN_T_RUN_MS,
-      bin_ms: 3,
-    });
-    const FE = global.FlyExperience;
-    if (!FE) return false;
-    FE.setStreamContext({
-      cascadeSvg: live.hooks.cascadeSvg,
-      rasterSvg: live.hooks.rasterSvg,
-      legendEl: live.hooks.legendEl,
-      stateData,
-      meta,
-      onProgress: (_f, sliced) => {
-        driveAnatomy(sliced || stateData);
-      },
-    });
-    FE.setStreamProgress(frac);
-    live.brainSource = "brian2";
-    return true;
-  }
-
-  function pushStandinPanels() {
-    if (!live || !live.hooks) return;
-    const { raster, tRunMs } = rebaseRasterForDisplay(live.brain);
-    const n = live.brain.rate_curves.ALPN.length;
-    const last = (s) => {
-      const c = live.brain.rate_curves[s];
-      return c.length ? c[c.length - 1] : 0;
-    };
-    const stateData = {
-      rate_curves: live.brain.rate_curves,
-      raster,
-      alpn_rate: last("ALPN"),
-      kc_rate: last("Kenyon_Cell"),
-      mbon_rate: last("MBON"),
-      dan_rate: last("DAN"),
-      stimulus: {
-        channels: PITCH_NAMES,
-        values: live.lastChroma || live.playing.chroma_mean,
-      },
-      brain_source: "standin",
-    };
-    const meta = Object.assign({}, live.hooks.meta || {}, {
-      t_run_ms: tRunMs,
-      bin_ms: BIN_MS,
-    });
-    const FE = global.FlyExperience;
-    if (!FE) return;
-    FE.setStreamContext({
-      cascadeSvg: live.hooks.cascadeSvg,
-      rasterSvg: live.hooks.rasterSvg,
-      legendEl: live.hooks.legendEl,
-      stateData,
-      meta,
-      onProgress: (_f, sliced) => {
-        driveAnatomy(sliced || stateData);
-      },
-    });
-    FE.renderCascade(
-      live.hooks.cascadeSvg,
-      live.hooks.legendEl,
-      stateData,
-      meta,
-      { streamFrac: n ? 1 : 0 }
-    );
-    FE.renderRaster(live.hooks.rasterSvg, stateData, meta, { streamFrac: n ? 1 : 0 });
-    driveAnatomy(stateData);
-    live.brainSource = "standin";
   }
 
   function driveAnatomy(stateData) {
@@ -752,15 +690,7 @@
       (live.courting && live.courting.pheromone) ||
       0;
 
-    if (!pushBrianPanels(progress, drive)) {
-      const rates = instantRates(live.lastChroma, drive, live.playing);
-      const tMs = t * 1000;
-      if (tMs - live.lastBinMs >= sliceSec * 1000 - 5) {
-        live.lastBinMs = tMs;
-        appendBrainSample(live.brain, tMs, rates);
-        pushStandinPanels();
-      }
-    }
+    processBrainAtHead(t, live.lastChroma, drive);
 
     renderHud();
   }
@@ -780,7 +710,7 @@
     live.memory = [];
     live.lastSliceT = null;
     live.brain = { rate_curves: emptyCurves(), raster: emptyRaster() };
-    live.lastBinMs = -BIN_MS;
+    live.brain.lastBinIdx = -1;
     live.lastChroma = L.chromaAtTime(track, 0);
 
     // Start with one random favorite (not the whole crate ranked)
@@ -821,16 +751,13 @@
     const drive0 =
       (live.courting && live.courting.courtship && live.courting.courtship.courtship_drive) ||
       0;
-    if (!pushBrianPanels(0, drive0)) pushStandinPanels();
+    processBrainAtHead(0, live.lastChroma, drive0);
 
     const hint = document.getElementById("loflyAudioHint");
-    const hasBrian = !!bankEntryFor(track.id);
     const tryPlay = () => {
       audio.play().then(() => {
         if (hint) {
-          hint.textContent = hasBrian
-            ? "Brian2 pathway · scrubbed with the song"
-            : "stand-in rates · Brian2 bank missing for this track";
+          hint.textContent = "live pathway · processing at the playhead";
         }
       }).catch(() => {
         if (hint) hint.textContent = "press play — browser blocked autoplay";
@@ -907,11 +834,7 @@
       hooks.nextBtn.onclick = () => {
         if (!live) return;
         const all = Object.keys(live.tracks);
-        const banked = listeningBank
-          ? all.filter((id) => listeningBank.tracks && listeningBank.tracks[id])
-          : [];
-        const pool = banked.length ? banked : all;
-        const id = pool[Math.floor(Math.random() * pool.length)];
+        const id = all[Math.floor(Math.random() * all.length)];
         loadTrack(live.tracks[id], { autoplay: true });
       };
       hooks.nextBtn.setAttribute("aria-label", "Random new song");
@@ -938,23 +861,12 @@
       return;
     }
 
-    try {
-      const br = await fetch(LOFLY_BASE + "listening_bank.json");
-      if (br.ok) listeningBank = await br.json();
-    } catch (_) {
-      listeningBank = null;
-    }
-
     const tracks = cat.tracks || {};
     const ids = Object.keys(tracks);
     if (ids.length < 2) {
       hooks.noteEl.textContent = "Need ≥2 catalogued tracks.";
       return;
     }
-
-    const bankIds = listeningBank
-      ? ids.filter((id) => listeningBank.tracks && listeningBank.tracks[id])
-      : [];
 
     live = {
       hooks,
@@ -980,8 +892,8 @@
       nTicks: 3,
       switches: 0,
       brain: { rate_curves: emptyCurves(), raster: emptyRaster() },
-      brainSource: "standin",
-      lastBinMs: -BIN_MS,
+      brainSource: "live",
+      lastBinMs: -1,
       lastChroma: null,
     };
 
@@ -989,13 +901,10 @@
     wireStepbar(hooks);
 
     if (hooks.tabsEl) {
-      const nBank = bankIds.length;
-      hooks.tabsEl.innerHTML = `<button class="tab active" type="button">live · Brian2 bank ${nBank}/${ids.length}</button>`;
+      hooks.tabsEl.innerHTML = `<button class="tab active" type="button">live · playhead processing · ${ids.length} tracks</button>`;
     }
 
-    // Prefer a track that already has Brian2 fingerprints
-    const pool = bankIds.length ? bankIds : ids;
-    const startId = pool[Math.floor(Math.random() * pool.length)];
+    const startId = ids[Math.floor(Math.random() * ids.length)];
     loadTrack(tracks[startId], { autoplay: true });
   }
 
@@ -1010,7 +919,7 @@
     const n =
       (meta.activity_payload && meta.activity_payload.catalogue_n) || "?";
     return `
-      <div><strong style="color:var(--text)">Live:</strong> chroma follows the playhead (0.2s slices). Pause the song → evaluation freezes. After 7s of playback memory, keep the eye as NEXT or glance elsewhere.</div>
+      <div><strong style="color:var(--text)">Live:</strong> pathway + chroma process at the playhead (0.2s). No banked Brian scrub. Pause freezes evaluation. After 7s memory, keep the eye as NEXT or glance elsewhere.</div>
       <div><strong style="color:var(--text)">Eyemap:</strong> each of ~892 hexes samples a UV tile of the playing chromagram (equal split + overlap). Color = UV spectrum by local pitch; brightness = energy. Follows the playhead.</div>
       <div><strong style="color:var(--text)">Toggles:</strong> prefer complement, novelty, clash penalty, Camelot boost.</div>
       <div><strong style="color:var(--text)">Crate:</strong> ${n} tracks in memory; skip → locks partner; 🎲 new random song.</div>`;

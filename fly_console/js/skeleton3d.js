@@ -94,14 +94,16 @@
       positions[i * 3] = p[0];
       positions[i * 3 + 1] = p[1];
       positions[i * 3 + 2] = p[2];
-      colors[i * 3] = r * 0.02;
-      colors[i * 3 + 1] = g * 0.02;
-      colors[i * 3 + 2] = b * 0.02;
+      // Full stage hue from the start — opacity alone handles see-through.
+      colors[i * 3] = r;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = b;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     const mat = new THREE.LineBasicMaterial({
+      color: 0xffffff,
       vertexColors: true,
       transparent: true,
       opacity: 0.02,
@@ -112,8 +114,9 @@
   }
 
   /**
-   * Write traveling-wave vertex colors. Called at ~15 Hz, not every frame.
-   * wavePos is 0..1 head of the pulse along the polyline.
+   * Traveling color pulse along the axon. Keeps saturated stage hue;
+   * pulse head brightens toward white — never crushes RGB toward black
+   * (transparency is material.opacity's job).
    */
   function paintWave(line, boost, wavePos) {
     const geo = line.geometry;
@@ -121,17 +124,23 @@
     const n = geo.attributes.position.count;
     const base = line.material.userData.baseRgb || [1, 1, 1];
     const phase = line.material.userData.fadePhase || 0;
-    // Quiet axons stay near black; only active boost lights the wave.
-    const gate = boost * boost;
+    const activity = Math.max(0, Math.min(1, boost));
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0 : i / (n - 1);
       const dist = Math.abs(t - wavePos);
       const wrap = Math.min(dist, 1 - dist);
-      const packet = Math.exp(-wrap * wrap * 28);
-      const shimmer = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * Math.PI * 4 + phase));
-      const fade = (0.08 + 0.92 * packet) * shimmer;
-      const v = fade * gate;
-      colors.setXYZ(i, base[0] * v, base[1] * v, base[2] * v);
+      const packet = Math.exp(-wrap * wrap * 22);
+      const shimmer =
+        0.82 + 0.18 * Math.sin(t * Math.PI * 3 + phase + activity * 2);
+      // Body stays stage-colored; pulse tip flares toward white.
+      const flare = packet * (0.35 + 0.65 * activity);
+      const body = shimmer * (0.7 + 0.3 * activity);
+      colors.setXYZ(
+        i,
+        Math.min(1, base[0] * body + flare * (1 - base[0] * 0.35)),
+        Math.min(1, base[1] * body + flare * (1 - base[1] * 0.35)),
+        Math.min(1, base[2] * body + flare * (1 - base[2] * 0.35))
+      );
     }
     colors.needsUpdate = true;
   }
@@ -337,18 +346,22 @@
           }
         }
 
-        if (streamActive && now - lastPaint > 80) {
+        if (now - lastPaint > 80) {
           lastPaint = now;
           const batch = 400;
           const start = (paintCursor || 0) % Math.max(1, lines.length);
           for (let i = start; i < Math.min(lines.length, start + batch); i++) {
             const line = lines[i];
+            if (!line.visible) continue;
             const st = line.userData.stage || "other";
             const boost = stageBoost[st] != null ? stageBoost[st] : stageBoost.other;
             const speed = line.userData.speed || 0.5;
-            const wavePos =
-              (t * speed * (0.4 + boost * 1.6) + (line.material.userData.fadePhase || 0)) %
-              1;
+            // Animate pulse while streaming; park wave mid-axon when frozen.
+            const wavePos = streamActive
+              ? (t * speed * (0.45 + boost * 1.8) +
+                  (line.material.userData.fadePhase || 0)) %
+                1
+              : 0.35;
             paintWave(line, boost, wavePos);
           }
           paintCursor = start + batch;

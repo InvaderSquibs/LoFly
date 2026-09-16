@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>FX · Fly Experience</title>
+  <link rel="stylesheet" href="sidepanel.css"/>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">FX · Fly Experience</div>
+    <p class="sub">Gherkin on the active tab. The fly nearest-neighbor searches, then clicks / types / asserts.</p>
+  </header>
+
+  <section class="block">
+    <div class="cap">gherkin</div>
+    <textarea id="feature" class="feature mono" spellcheck="false"></textarea>
+  </section>
+
+  <section class="toolbar">
+    <button type="button" class="run" id="runBtn">▶ Run on this tab</button>
+    <button type="button" class="stop" id="stopBtn">Stop</button>
+    <span class="mono status" id="status">idle</span>
+  </section>
+
+  <section class="block">
+    <div class="cap">perception</div>
+    <div class="perceive mono" id="perceive">—</div>
+  </section>
+
+  <section class="block">
+    <div class="cap">step log</div>
+    <ol class="log mono" id="log"></ol>
+  </section>
+
+  <footer class="foot mono">Load unpacked → chrome://extensions · open side panel · run on any http(s) page</footer>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

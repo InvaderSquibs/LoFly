@@ -1,0 +1,135 @@
+{
+  "format": "11x11 standard · Walton + 3 bots (same shape as first custom game)",
+  "tiers": [
+    {
+      "id": "t0_trio_soft",
+      "label": "3 bots · soft (Hungry/Scared/Hippo lite)",
+      "width": 11,
+      "height": 11,
+      "gametype": "standard",
+      "delay": 10,
+      "bot_pack": "soft",
+      "opponents": [
+        {
+          "name": "Bot-Hungry",
+          "url": "http://127.0.0.1:8002",
+          "dials": "dials/bots/soft_hungry.json"
+        },
+        {
+          "name": "Bot-Scared",
+          "url": "http://127.0.0.1:8003",
+          "dials": "dials/bots/soft_scared.json"
+        },
+        {
+          "name": "Bot-Hippo",
+          "url": "http://127.0.0.1:8004",
+          "dials": "dials/bots/soft_hippo.json"
+        }
+      ]
+    },
+    {
+      "id": "t1_trio_beginner",
+      "label": "3 bots · beginner (first-game style)",
+      "width": 11,
+      "height": 11,
+      "gametype": "standard",
+      "delay": 10,
+      "bot_pack": "beginner",
+      "opponents": [
+        {
+          "name": "Bot-Hungry",
+          "url": "http://127.0.0.1:8002",
+          "dials": "dials/bots/beginner_hungry.json"
+        },
+        {
+          "name": "Bot-Scared",
+          "url": "http://127.0.0.1:8003",
+          "dials": "dials/bots/beginner_scared.json"
+        },
+        {
+          "name": "Bot-Hippo",
+          "url": "http://127.0.0.1:8004",
+          "dials": "dials/bots/beginner_hippo.json"
+        }
+      ]
+    },
+    {
+      "id": "t2_trio_balanced",
+      "label": "3 bots · balanced (peer orchard)",
+      "width": 11,
+      "height": 11,
+      "gametype": "standard",
+      "delay": 10,
+      "bot_pack": "balanced",
+      "opponents": [
+        {
+          "name": "Bot-Hungry",
+          "url": "http://127.0.0.1:8002",
+          "dials": "dials/bots/balanced.json"
+        },
+        {
+          "name": "Bot-Scared",
+          "url": "http://127.0.0.1:8003",
+          "dials": "dials/bots/balanced.json"
+        },
+        {
+          "name": "Bot-Hippo",
+          "url": "http://127.0.0.1:8004",
+          "dials": "dials/bots/balanced.json"
+        }
+      ]
+    },
+    {
+      "id": "t3_trio_hungry",
+      "label": "3 bots · hungry-hard",
+      "width": 11,
+      "height": 11,
+      "gametype": "standard",
+      "delay": 8,
+      "bot_pack": "hungry_hard",
+      "opponents": [
+        {
+          "name": "Bot-Hungry",
+          "url": "http://127.0.0.1:8002",
+          "dials": "dials/bots/hungry_hard.json"
+        },
+        {
+          "name": "Bot-Scared",
+          "url": "http://127.0.0.1:8003",
+          "dials": "dials/bots/hungry_hard.json"
+        },
+        {
+          "name": "Bot-Hippo",
+          "url": "http://127.0.0.1:8004",
+          "dials": "dials/bots/hungry_hard.json"
+        }
+      ]
+    },
+    {
+      "id": "t4_trio_aggressive",
+      "label": "3 bots · aggressive",
+      "width": 11,
+      "height": 11,
+      "gametype": "standard",
+      "delay": 6,
+      "bot_pack": "aggressive",
+      "opponents": [
+        {
+          "name": "Bot-Hungry",
+          "url": "http://127.0.0.1:8002",
+          "dials": "dials/bots/aggressive.json"
+        },
+        {
+          "name": "Bot-Scared",
+          "url": "http://127.0.0.1:8003",
+          "dials": "dials/bots/aggressive.json"
+        },
+        {
+          "name": "Bot-Hippo",
+          "url": "http://127.0.0.1:8004",
+          "dials": "dials/bots/aggressive.json"
+        }
+      ]
+    }
+  ]
+}

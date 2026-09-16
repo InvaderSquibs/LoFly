@@ -1,0 +1,19 @@
+{
+  "id": "bot-aggressive",
+  "role": "aggressive",
+  "wiring": "retina_sectors_v1_orchard",
+  "notes": "Low panic, hard race — top local rung",
+  "panic_food_gate": 0.7,
+  "panic_safety_thresh": 0.12,
+  "panic_danger_thresh": 0.5,
+  "starve_blocks_panic_above": 0.75,
+  "fruit_hard_danger": 0.5,
+  "fruit_soft_danger": 1.25,
+  "fruit_soft_scale": 0.7,
+  "wall_counts_as_danger": false,
+  "undersized_food_gate": 1.1,
+  "race_food_gate": 1.65,
+  "exclusive_near_boost": 1.4,
+  "smell_panic_dampen": 0.65,
+  "bite_override_panic": true
+}

@@ -1,0 +1,19 @@
+{
+  "id": "bot-soft-hungry",
+  "role": "hungry-lite",
+  "wiring": "retina_sectors_v1_orchard",
+  "notes": "Mild food seeker — soft ladder rung",
+  "panic_food_gate": 0.25,
+  "panic_safety_thresh": 0.35,
+  "panic_danger_thresh": 1.5,
+  "starve_blocks_panic_above": 0.4,
+  "fruit_hard_danger": 1.5,
+  "fruit_soft_danger": 2.5,
+  "fruit_soft_scale": 0.25,
+  "wall_counts_as_danger": true,
+  "undersized_food_gate": 0.7,
+  "race_food_gate": 1.05,
+  "exclusive_near_boost": 1.0,
+  "smell_panic_dampen": 0.2,
+  "bite_override_panic": false
+}

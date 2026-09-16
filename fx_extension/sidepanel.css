@@ -1,0 +1,125 @@
+:root {
+  --bg: #0a0d10;
+  --panel: #12181d;
+  --panel-2: #161d23;
+  --border: #263139;
+  --text: #dde7ea;
+  --text-dim: #8496a1;
+  --text-faint: #526069;
+  --gold: #f0b429;
+  --cyan: #52c7e0;
+  --green: #4fdb9e;
+  --coral: #ef6a61;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+body {
+  padding: 14px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.top .brand {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+.top .sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.cap {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.feature {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.run, .stop {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  border-radius: 5px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  border: 1px solid var(--gold);
+}
+.run {
+  background: var(--gold);
+  color: var(--bg);
+}
+.stop {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.status {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.perceive {
+  font-size: 11px;
+  color: var(--cyan);
+  line-height: 1.35;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  min-height: 2.6em;
+}
+
+.log {
+  margin: 0;
+  padding: 8px 8px 8px 26px;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.log .pass { color: var(--green); }
+.log .fail { color: var(--coral); }
+
+.foot {
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}

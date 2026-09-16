@@ -4,6 +4,8 @@
  * Base fill = anatomical neuron counts per column.
  * Live LoFly: each hex samples a UV patch of the chromagram image
  * (equal tile + slight overlap) and lights on a UV-ish spectral colormap.
+ * Live FX: each hex samples a UV patch of a website raster and fills with
+ * the average RGB of that overlapping pixel grid.
  */
 (function (global) {
   "use strict";
@@ -49,7 +51,6 @@
   function uvSpectrumRgb(pitch01, intensity) {
     const t = Math.max(0, Math.min(1, pitch01));
     const a = Math.max(0, Math.min(1, intensity));
-    // 275° → 175° in HSL-ish space (violet through blue to cyan)
     const hue = (275 - t * 100) / 360;
     const sat = 0.55 + 0.4 * a;
     const lit = 0.12 + 0.55 * a;
@@ -119,13 +120,60 @@
     return { energy: energy / 12, pitch01, bins };
   }
 
+  /**
+   * Visual retina: average RGBA over an overlapping UV tile of a website raster.
+   * rgba = Uint8ClampedArray length w*h*4 (row-major).
+   */
+  function sampleVisualPatch(img, u, v, ru, rv) {
+    if (!img || !img.rgba || !img.w || !img.h) {
+      return { r: 0, g: 0, b: 0, a: 0, n: 0 };
+    }
+    const w = img.w;
+    const h = img.h;
+    const x0 = Math.max(0, Math.floor((u - ru) * w));
+    const x1 = Math.min(w - 1, Math.ceil((u + ru) * w));
+    const y0 = Math.max(0, Math.floor((v - rv) * h));
+    const y1 = Math.min(h - 1, Math.ceil((v + rv) * h));
+    const span = Math.max(1, x1 - x0 + 1) * Math.max(1, y1 - y0 + 1);
+    const step = span > 400 ? 2 : 1;
+    let r = 0,
+      g = 0,
+      b = 0,
+      a = 0,
+      n = 0;
+    const rgba = img.rgba;
+    for (let y = y0; y <= y1; y += step) {
+      for (let x = x0; x <= x1; x += step) {
+        const i = (y * w + x) * 4;
+        const aa = rgba[i + 3];
+        if (aa < 8) continue;
+        const wgt = aa / 255;
+        r += rgba[i] * wgt;
+        g += rgba[i + 1] * wgt;
+        b += rgba[i + 2] * wgt;
+        a += aa;
+        n += wgt;
+      }
+    }
+    if (n < 1e-6) return { r: 28, g: 38, b: 45, a: 0, n: 0 };
+    return {
+      r: Math.round(r / n),
+      g: Math.round(g / n),
+      b: Math.round(b / n),
+      a: Math.round(a / Math.max(1, span / (step * step))),
+      n,
+    };
+  }
+
   function createEyemapPanel(opts) {
     const { svgEl, selectEl, noteEl, legendEl } = opts;
     let data = null;
     let currentType = null;
     let layout = null;
     let streamActive = false;
-    let chromaImage = null; // { w, h, data }
+    let chromaImage = null;
+    let visualImage = null;
+    let mode = "chroma";
     let polyEls = [];
 
     const COL_ANAT_LO = "#1c262d";
@@ -149,7 +197,6 @@
       const spanX = Math.max(1e-6, maxX - minX);
       const spanY = Math.max(1e-6, maxY - minY);
 
-      // UV from hex position; equal tile with slight overlap
       const n = laid.length;
       const tile = (0.5 / Math.sqrt(Math.max(1, n))) * OVERLAP;
       for (const c of laid) {
@@ -180,7 +227,16 @@
       const ag = m ? +m[2] : 38;
       const ab = m ? +m[3] : 45;
 
-      if (!streamActive || !chromaImage) return base;
+      if (!streamActive) return base;
+
+      if (mode === "visual" && visualImage) {
+        const s = sampleVisualPatch(visualImage, c.u, c.v, c.ru, c.rv);
+        if (s.n < 1e-6) return base;
+        const t = 0.92;
+        return `rgb(${Math.round(ar + (s.r - ar) * t)},${Math.round(ag + (s.g - ag) * t)},${Math.round(ab + (s.b - ab) * t)})`;
+      }
+
+      if (!chromaImage) return base;
 
       const s = samplePatch(chromaImage, c.u, c.v, c.ru, c.rv);
       const intensity = Math.min(1, s.energy * 4.5);
@@ -191,25 +247,67 @@
       return `rgb(${Math.round(ar + (sr - ar) * t)},${Math.round(ag + (sg - ag) * t)},${Math.round(ab + (sb - ab) * t)})`;
     }
 
-    function paintChroma() {
+    function paintLive() {
       if (!layout || !polyEls.length) return;
       for (let i = 0; i < polyEls.length; i++) {
         const c = layout.laid[i];
         const el = polyEls[i];
         if (!c || !el) continue;
         el.setAttribute("fill", columnFill(c));
-        const s =
-          streamActive && chromaImage
-            ? samplePatch(chromaImage, c.u, c.v, c.ru, c.rv)
-            : null;
         const title = el.querySelector("title");
-        if (title) {
+        if (!title) continue;
+        if (mode === "visual" && streamActive && visualImage) {
+          const s = sampleVisualPatch(visualImage, c.u, c.v, c.ru, c.rv);
+          title.textContent =
+            `${currentType} · q=${c.q} r=${c.r} · uv ${c.u.toFixed(2)},${c.v.toFixed(2)} · anat ${c.value}` +
+            ` · rgb(${s.r},${s.g},${s.b}) · patch n=${s.n.toFixed(0)}`;
+        } else {
+          const s =
+            streamActive && chromaImage
+              ? samplePatch(chromaImage, c.u, c.v, c.ru, c.rv)
+              : null;
           title.textContent =
             `${currentType} · q=${c.q} r=${c.r} · uv ${c.u.toFixed(2)},${c.v.toFixed(2)} · anat ${c.value}` +
             (s
               ? ` · E ${s.energy.toFixed(3)} · ~${PITCH_NAMES[Math.round(s.pitch01 * 11)] || "?"}`
               : "");
         }
+      }
+    }
+
+    function paintChroma() {
+      paintLive();
+    }
+
+    function updateLegendNotes() {
+      const entry =
+        data && currentType && data.types[currentType] ? data.types[currentType] : null;
+      if (legendEl) {
+        if (mode === "visual") {
+          legendEl.innerHTML = `
+            <span><span class="swatch" style="background:#f0b429"></span><span class="swatch" style="background:#52c7e0"></span><span class="swatch" style="background:#4fdb9e"></span> site average RGB</span>
+            <span style="color:var(--text-faint)">${
+              entry ? entry.n_neurons + " neurons · " + entry.n_columns + " cols" : ""
+            } · overlapping pixel tiles</span>`;
+        } else {
+          const swatches = [0, 0.25, 0.5, 0.75, 1]
+            .map((t) => {
+              const [r, g, b] = uvSpectrumRgb(t, 0.85);
+              return `<span class="swatch" style="background:rgb(${r},${g},${b})"></span>`;
+            })
+            .join("");
+          legendEl.innerHTML = `
+            <span>${swatches} UV spectrum</span>
+            <span style="color:var(--text-faint)">${
+              entry ? entry.n_neurons + " neurons · " + entry.n_columns + " cols" : ""
+            } · UV chromagram tiles</span>`;
+        }
+      }
+      if (noteEl) {
+        noteEl.textContent =
+          mode === "visual"
+            ? "Each hex is a retinal facet: overlapping pixel grid on the under-test page. Fill = average RGB of that spot."
+            : "Each hex samples a UV patch of the playing chromagram (equal tiles + overlap). Color = UV spectrum by local pitch; brightness = energy. Follows the playhead.";
       }
     }
 
@@ -257,35 +355,23 @@
       }
       svgEl.innerHTML = "";
       svgEl.appendChild(g);
-      paintChroma();
-
-      if (legendEl) {
-        const swatches = [0, 0.25, 0.5, 0.75, 1]
-          .map((t) => {
-            const [r, g, b] = uvSpectrumRgb(t, 0.85);
-            return `<span class="swatch" style="background:rgb(${r},${g},${b})"></span>`;
-          })
-          .join("");
-        legendEl.innerHTML = `
-          <span>${swatches} UV spectrum</span>
-          <span style="color:var(--text-faint)">${entry.n_neurons} neurons · ${entry.n_columns} cols · UV chromagram tiles</span>`;
-      }
-      if (noteEl) {
-        noteEl.textContent =
-          "Each hex samples a UV patch of the playing chromagram (equal tiles + overlap). Color = UV spectrum by local pitch; brightness = energy. Follows the playhead.";
-      }
+      paintLive();
+      updateLegendNotes();
     }
 
     function update(stateData) {
-      if (stateData && stateData.chroma_image) {
+      if (stateData && stateData.visual_image) {
+        setVisualImage(stateData.visual_image);
+      } else if (stateData && stateData.chroma_image) {
         setChromaImage(stateData.chroma_image);
       } else if (stateData && stateData.chroma_fields) {
-        // Back-compat: single chroma vectors → 1-wide strip image
         setChromaFields(stateData.chroma_fields);
       }
     }
 
     function setChromaImage(img) {
+      mode = "chroma";
+      visualImage = null;
       if (!img || !img.data || !img.w) {
         chromaImage = null;
       } else {
@@ -295,21 +381,43 @@
           data: img.data,
         };
       }
-      if (streamActive) paintChroma();
+      updateLegendNotes();
+      if (streamActive) paintLive();
     }
 
-    /** Build a thin image from hear/court/eye vectors (fallback). */
+    /**
+     * Website raster for FX vision.
+     * @param {{w:number,h:number,rgba:Uint8ClampedArray|number[]}} img
+     */
+    function setVisualImage(img) {
+      mode = "visual";
+      chromaImage = null;
+      if (!img || !img.rgba || !img.w || !img.h) {
+        visualImage = null;
+      } else {
+        visualImage = {
+          w: img.w,
+          h: img.h,
+          rgba: img.rgba instanceof Uint8ClampedArray ? img.rgba : new Uint8ClampedArray(img.rgba),
+        };
+      }
+      updateLegendNotes();
+      if (streamActive) paintLive();
+    }
+
     function setChromaFields(fields) {
+      mode = "chroma";
+      visualImage = null;
       const hear = fields && fields.hear;
       if (!hear) {
         chromaImage = null;
-        if (streamActive) paintChroma();
+        updateLegendNotes();
+        if (streamActive) paintLive();
         return;
       }
-      const data = new Float32Array(12);
-      for (let i = 0; i < 12; i++) data[i] = Number(hear[i]) || 0;
-      // Optional blend court/eye into neighboring time columns
-      const cols = [data];
+      const dataArr = new Float32Array(12);
+      for (let i = 0; i < 12; i++) dataArr[i] = Number(hear[i]) || 0;
+      const cols = [dataArr];
       if (fields.court) {
         const c = new Float32Array(12);
         for (let i = 0; i < 12; i++) c[i] = Number(fields.court[i]) || 0;
@@ -328,7 +436,13 @@
 
     function setActive(on) {
       streamActive = !!on;
-      paintChroma();
+      paintLive();
+    }
+
+    function setMode(next) {
+      mode = next === "visual" ? "visual" : "chroma";
+      updateLegendNotes();
+      paintLive();
     }
 
     async function init() {
@@ -352,8 +466,17 @@
       render();
     }
 
-    return { init, render, update, setActive, setChromaFields, setChromaImage };
+    return {
+      init,
+      render,
+      update,
+      setActive,
+      setMode,
+      setChromaFields,
+      setChromaImage,
+      setVisualImage,
+    };
   }
 
-  global.FlyEyemap = { createEyemapPanel, axialToPixel };
+  global.FlyEyemap = { createEyemapPanel, axialToPixel, sampleVisualPatch };
 })(window);
